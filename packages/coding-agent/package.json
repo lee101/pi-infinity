@@ -1,14 +1,14 @@
 {
-	"name": "@mariozechner/pi-coding-agent",
+	"name": "@codex-infinity/pinf",
 	"version": "0.52.2",
 	"description": "Coding agent CLI with read, bash, edit, write tools and session management",
 	"type": "module",
 	"piConfig": {
-		"name": "pi",
-		"configDir": ".pi"
+		"name": "pinf",
+		"configDir": ".pinf"
 	},
 	"bin": {
-		"pi": "dist/cli.js"
+		"pinf": "dist/cli.js"
 	},
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",

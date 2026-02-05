@@ -69,6 +69,11 @@ export interface CreateAgentSessionOptions {
 
 	/** Settings manager. Default: SettingsManager.create(cwd, agentDir) */
 	settingsManager?: SettingsManager;
+
+	/** Automatically continue with next steps after each turn */
+	autoNextSteps?: boolean;
+	/** Automatically ideate and work on new ideas after completing tasks */
+	autoNextIdea?: boolean;
 }
 
 /** Result from createAgentSession */
@@ -354,6 +359,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		modelRegistry,
 		initialActiveToolNames,
 		extensionRunnerRef,
+		autoNextSteps: options.autoNextSteps,
+		autoNextIdea: options.autoNextIdea,
 	});
 	const extensionsResult = resourceLoader.getExtensions();
 
