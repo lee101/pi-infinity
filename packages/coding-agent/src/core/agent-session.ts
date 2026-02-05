@@ -148,6 +148,10 @@ export interface AgentSessionConfig {
 	baseToolsOverride?: Record<string, AgentTool>;
 	/** Mutable ref used by Agent to access the current ExtensionRunner */
 	extensionRunnerRef?: { current?: ExtensionRunner };
+	/** Automatically continue with next steps after each turn */
+	autoNextSteps?: boolean;
+	/** Automatically ideate and work on new ideas after completing tasks */
+	autoNextIdea?: boolean;
 }
 
 export interface ExtensionBindings {
@@ -241,6 +245,10 @@ export class AgentSession {
 	private _retryPromise: Promise<void> | undefined = undefined;
 	private _retryResolve: (() => void) | undefined = undefined;
 
+	// Autonomous mode settings
+	private _autoNextSteps: boolean = false;
+	private _autoNextIdea: boolean = false;
+
 	// Bash execution state
 	private _bashAbortController: AbortController | undefined = undefined;
 	private _pendingBashMessages: BashExecutionMessage[] = [];
@@ -283,6 +291,8 @@ export class AgentSession {
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
 		this._baseToolsOverride = config.baseToolsOverride;
+		this._autoNextSteps = config.autoNextSteps ?? false;
+		this._autoNextIdea = config.autoNextIdea ?? false;
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
@@ -392,6 +402,9 @@ export class AgentSession {
 			}
 
 			await this._checkCompaction(msg);
+
+			// Queue autonomous follow-up if enabled (after compaction, so it has full context)
+			this._maybeQueueAutonomousFollowUp(msg);
 		}
 	};
 
@@ -2092,6 +2105,54 @@ export class AgentSession {
 		return /overloaded|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server error|internal error|connection.?error|connection.?refused|other side closed|fetch failed|upstream.?connect|reset before headers|terminated|retry delay/i.test(
 			err,
 		);
+	}
+
+	/**
+	 * Check if autonomous mode is enabled and queue follow-up prompts.
+	 */
+	private _maybeQueueAutonomousFollowUp(message: AssistantMessage): void {
+		if (!this._autoNextSteps && !this._autoNextIdea) {
+			return;
+		}
+
+		// Don't auto-continue on errors
+		if (message.stopReason === "error" || message.stopReason === "aborted") {
+			return;
+		}
+
+		// Extract summary from the assistant message
+		const textContent = message.content.filter((c) => c.type === "text").map((c) => c.text);
+		const summary = textContent.join("\n").trim();
+
+		if (!summary) {
+			return;
+		}
+
+		// Build autonomous prompt based on enabled modes
+		let prompt = "You are in AUTONOMOUS MODE. Do not ask for permission or confirmation.\n\n";
+
+		if (this._autoNextSteps) {
+			prompt +=
+				"Continue working autonomously on the current objectives. Break the overall goal into concrete next steps, execute them carefully in order, and run relevant tests as needed.\n\n";
+		}
+
+		if (this._autoNextIdea) {
+			prompt +=
+				"After finishing the current plan, shift into ideation mode and brainstorm at least three concrete improvements for this project. Pick the highest-impact idea and start executing it immediately.\n\n";
+		}
+
+		if (this._autoNextSteps && this._autoNextIdea) {
+			prompt += "Repeat this cycle indefinitely until a human interrupts you.\n\n";
+		}
+
+		prompt += `Use the latest summary of work below as context when outlining your follow-up actions:\n\n${summary}`;
+
+		// Queue the autonomous prompt as a follow-up message
+		this.agent.followUp({
+			role: "user",
+			content: [{ type: "text", text: prompt }],
+			timestamp: Date.now(),
+		});
 	}
 
 	/**

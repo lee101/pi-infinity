@@ -7,10 +7,13 @@ All PRs will be auto-closed until then. Approved contributors can submit PRs aft
 ---
 
 <p align="center">
-  <a href="https://shittycodingagent.ai">
-    <img src="https://shittycodingagent.ai/logo.svg" alt="pi logo" width="128">
+  <a href="https://codex-infinity.com/">
+    <img src="./pi-infinity.webp" alt="Pi Infinity" height="200">
   </a>
 </p>
+
+<h1 align="center">Pi Infinity</h1>
+
 <p align="center">
   <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="Discord" src="https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
   <a href="https://github.com/badlogic/pi-mono/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/badlogic/pi-mono/ci.yml?style=flat-square&branch=main" /></a>
@@ -21,7 +24,28 @@ All PRs will be auto-closed until then. Approved contributors can submit PRs aft
   <a href="https://exe.dev"><img src="packages/coding-agent/docs/images/exy.png" alt="Exy mascot" width="48" /><br />exe.dev</a>
 </p>
 
-# Pi Monorepo
+<p align="center"><strong>Pi Infinity</strong> is a coding agent that can run forever.</p>
+
+---
+
+## Autonomous Mode
+
+Pi can continuously work on your codebase with two flags:
+
+- **`--auto-next-steps`** - Automatically continues working on the next logical steps after completing a task
+- **`--auto-next-idea`** - Generates and implements new ideas to improve your codebase
+
+```shell
+# Run with automatic continuation
+pi --auto-next-steps
+
+# Fully autonomous: dream up and implement improvements
+pi --auto-next-steps --auto-next-idea
+```
+
+Run locally or on [bare metal GPU hardware](https://codex-infinity.com/).
+
+---
 
 > **Looking for the pi coding agent?** See **[packages/coding-agent](packages/coding-agent)** for installation and usage.
 

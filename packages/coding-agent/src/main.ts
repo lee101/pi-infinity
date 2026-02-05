@@ -508,6 +508,14 @@ function buildSessionOptions(
 		options.tools = parsed.tools.map((name) => allTools[name]);
 	}
 
+	// Autonomous mode flags
+	if (parsed.autoNextSteps) {
+		options.autoNextSteps = true;
+	}
+	if (parsed.autoNextIdea) {
+		options.autoNextIdea = true;
+	}
+
 	return { options, cliThinkingFromModel };
 }
 

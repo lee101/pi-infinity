@@ -1,14 +1,14 @@
 {
-	"name": "@mariozechner/pi-coding-agent",
-	"version": "0.54.0",
+	"name": "@codex-infinity/pinf",
+	"version": "0.52.2",
 	"description": "Coding agent CLI with read, bash, edit, write tools and session management",
 	"type": "module",
 	"piConfig": {
-		"name": "pi",
-		"configDir": ".pi"
+		"name": "pinf",
+		"configDir": ".pinf"
 	},
 	"bin": {
-		"pi": "dist/cli.js"
+		"pinf": "dist/cli.js"
 	},
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -40,9 +40,9 @@
 	},
 	"dependencies": {
 		"@mariozechner/jiti": "^2.6.2",
-		"@mariozechner/pi-agent-core": "^0.54.0",
-		"@mariozechner/pi-ai": "^0.54.0",
-		"@mariozechner/pi-tui": "^0.54.0",
+		"@mariozechner/pi-agent-core": "^0.52.2",
+		"@mariozechner/pi-ai": "^0.52.2",
+		"@mariozechner/pi-tui": "^0.52.2",
 		"@silvia-odwyer/photon-node": "^0.3.4",
 		"chalk": "^5.5.0",
 		"cli-highlight": "^2.1.11",

@@ -39,6 +39,8 @@ export interface Args {
 	noThemes?: boolean;
 	listModels?: string | true;
 	verbose?: boolean;
+	autoNextSteps?: boolean;
+	autoNextIdea?: boolean;
 	messages: string[];
 	fileArgs: string[];
 	/** Unknown flags (potentially extension flags) - map of flag name to value */
@@ -151,6 +153,10 @@ export function parseArgs(args: string[], extensionFlags?: Map<string, { type: "
 			}
 		} else if (arg === "--verbose") {
 			result.verbose = true;
+		} else if (arg === "--auto-next-steps") {
+			result.autoNextSteps = true;
+		} else if (arg === "--auto-next-idea") {
+			result.autoNextIdea = true;
 		} else if (arg.startsWith("@")) {
 			result.fileArgs.push(arg.slice(1)); // Remove @ prefix
 		} else if (arg.startsWith("--") && extensionFlags) {
@@ -217,6 +223,8 @@ ${chalk.bold("Options:")}
   --export <file>                Export session file to HTML and exit
   --list-models [search]         List available models (with optional fuzzy search)
   --verbose                      Force verbose startup (overrides quietStartup setting)
+  --auto-next-steps              Automatically continue with next steps after each turn
+  --auto-next-idea               Automatically ideate and work on new ideas after completing tasks
   --help, -h                     Show this help
   --version, -v                  Show version number
 
@@ -268,6 +276,12 @@ ${chalk.bold("Examples:")}
   # Export a session file to HTML
   ${APP_NAME} --export ~/${CONFIG_DIR_NAME}/agent/sessions/--path--/session.jsonl
   ${APP_NAME} --export session.jsonl output.html
+
+  # Autonomous mode: automatically continue with next steps
+  ${APP_NAME} --auto-next-steps "Refactor the codebase to use TypeScript"
+
+  # Fully autonomous: next steps + new ideas (run forever)
+  ${APP_NAME} --auto-next-steps --auto-next-idea "Improve the project"
 
 ${chalk.bold("Environment Variables:")}
   ANTHROPIC_API_KEY                - Anthropic Claude API key
