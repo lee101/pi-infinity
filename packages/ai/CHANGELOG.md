@@ -2,6 +2,59 @@
 
 ## [Unreleased]
 
+## [0.52.9] - 2026-02-08
+
+### Changed
+
+- Updated the Antigravity system instruction to a more compact version for Google Gemini CLI compatibility
+
+### Fixed
+
+- Use `parametersJsonSchema` for Google provider tool declarations to support full JSON Schema (anyOf, oneOf, const, etc.) ([#1398](https://github.com/badlogic/pi-mono/issues/1398) by [@jarib](https://github.com/jarib))
+- Reverted incorrect Antigravity model change: `claude-opus-4-6-thinking` back to `claude-opus-4-5-thinking` (model doesn't exist on Antigravity endpoint)
+- Corrected opencode context windows for Claude Sonnet 4 and 4.5 ([#1383](https://github.com/badlogic/pi-mono/issues/1383))
+
+## [0.52.8] - 2026-02-07
+
+### Added
+
+- Added OpenRouter `auto` model alias for automatic model routing ([#1361](https://github.com/badlogic/pi-mono/pull/1361) by [@yogasanas](https://github.com/yogasanas))
+
+### Changed
+
+- Replaced Claude Opus 4.5 with Opus 4.6 in model definitions ([#1345](https://github.com/badlogic/pi-mono/pull/1345) by [@calvin-hpnet](https://github.com/calvin-hpnet))
+
+## [0.52.7] - 2026-02-06
+
+### Added
+
+- Added `AWS_BEDROCK_SKIP_AUTH` and `AWS_BEDROCK_FORCE_HTTP1` environment variables for connecting to unauthenticated Bedrock proxies ([#1320](https://github.com/badlogic/pi-mono/pull/1320) by [@virtuald](https://github.com/virtuald))
+
+### Fixed
+
+- Set OpenAI Responses API requests to `store: false` by default to avoid server-side history logging ([#1308](https://github.com/badlogic/pi-mono/issues/1308))
+- Re-exported TypeBox `Type`, `Static`, and `TSchema` from `@mariozechner/pi-ai` to match documentation and avoid duplicate TypeBox type identity issues in pnpm setups ([#1338](https://github.com/badlogic/pi-mono/issues/1338))
+- Fixed Bedrock adaptive thinking handling for Claude Opus 4.6 with interleaved thinking beta responses ([#1323](https://github.com/badlogic/pi-mono/pull/1323) by [@markusylisiurunen](https://github.com/markusylisiurunen))
+- Fixed `AWS_BEDROCK_SKIP_AUTH` environment detection to avoid `process` access in non-Node.js environments
+
+## [0.52.6] - 2026-02-05
+
+## [0.52.5] - 2026-02-05
+
+### Fixed
+
+- Fixed `supportsXhigh()` to treat Anthropic Messages Opus 4.6 models as xhigh-capable so `streamSimple` can map `xhigh` to adaptive effort `max`
+
+## [0.52.4] - 2026-02-05
+
+## [0.52.3] - 2026-02-05
+
+### Fixed
+
+- Fixed Bedrock Opus 4.6 model IDs (removed `:0` suffix) and cache pricing for `us.*` and `eu.*` variants
+- Added missing `eu.anthropic.claude-opus-4-6-v1` inference profile to model catalog
+- Fixed Claude Opus 4.6 context window metadata to 200000 for Anthropic and OpenCode providers
+
 ## [0.52.2] - 2026-02-05
 
 ## [0.52.1] - 2026-02-05

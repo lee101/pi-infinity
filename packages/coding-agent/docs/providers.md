@@ -42,6 +42,8 @@ Use `/logout` to clear credentials. Tokens are stored in `~/.pi/agent/auth.json`
 
 ## API Keys
 
+### Environment Variables or Auth File
+
 Set via environment variable:
 
 ```bash
@@ -49,25 +51,28 @@ export ANTHROPIC_API_KEY=sk-ant-...
 pi
 ```
 
-| Provider | Environment Variable |
-|----------|---------------------|
-| Anthropic | `ANTHROPIC_API_KEY` |
-| OpenAI | `OPENAI_API_KEY` |
-| Google Gemini | `GEMINI_API_KEY` |
-| Mistral | `MISTRAL_API_KEY` |
-| Groq | `GROQ_API_KEY` |
-| Cerebras | `CEREBRAS_API_KEY` |
-| xAI | `XAI_API_KEY` |
-| OpenRouter | `OPENROUTER_API_KEY` |
-| Vercel AI Gateway | `AI_GATEWAY_API_KEY` |
-| ZAI | `ZAI_API_KEY` |
-| OpenCode Zen | `OPENCODE_API_KEY` |
-| Hugging Face | `HF_TOKEN` |
-| Kimi For Coding | `KIMI_API_KEY` |
-| MiniMax | `MINIMAX_API_KEY` |
-| MiniMax (China) | `MINIMAX_CN_API_KEY` |
+| Provider | Environment Variable | `auth.json` key |
+|----------|----------------------|------------------|
+| Anthropic | `ANTHROPIC_API_KEY` | `anthropic` |
+| Azure OpenAI Responses | `AZURE_OPENAI_API_KEY` | `azure-openai-responses` |
+| OpenAI | `OPENAI_API_KEY` | `openai` |
+| Google Gemini | `GEMINI_API_KEY` | `google` |
+| Mistral | `MISTRAL_API_KEY` | `mistral` |
+| Groq | `GROQ_API_KEY` | `groq` |
+| Cerebras | `CEREBRAS_API_KEY` | `cerebras` |
+| xAI | `XAI_API_KEY` | `xai` |
+| OpenRouter | `OPENROUTER_API_KEY` | `openrouter` |
+| Vercel AI Gateway | `AI_GATEWAY_API_KEY` | `vercel-ai-gateway` |
+| ZAI | `ZAI_API_KEY` | `zai` |
+| OpenCode Zen | `OPENCODE_API_KEY` | `opencode` |
+| Hugging Face | `HF_TOKEN` | `huggingface` |
+| Kimi For Coding | `KIMI_API_KEY` | `kimi-coding` |
+| MiniMax | `MINIMAX_API_KEY` | `minimax` |
+| MiniMax (China) | `MINIMAX_CN_API_KEY` | `minimax-cn` |
 
-## Auth File
+Reference for environment variables and `auth.json` keys: [`const envMap`](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/env-api-keys.ts) in [`packages/ai/src/env-api-keys.ts`](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/env-api-keys.ts).
+
+#### Auth File
 
 Store credentials in `~/.pi/agent/auth.json`:
 
@@ -138,6 +143,19 @@ Also supports ECS task roles (`AWS_CONTAINER_CREDENTIALS_*`) and IRSA (`AWS_WEB_
 
 ```bash
 pi --provider amazon-bedrock --model us.anthropic.claude-sonnet-4-20250514-v1:0
+```
+
+If you are connecting to a Bedrock API proxy, the following environment variables can be used:
+
+```bash
+# Set the URL for the Bedrock proxy (standard AWS SDK env var)
+export AWS_ENDPOINT_URL_BEDROCK_RUNTIME=https://my.corp.proxy/bedrock
+
+# Set if your proxy does not require authentication
+export AWS_BEDROCK_SKIP_AUTH=1
+
+# Set if your proxy only supports HTTP/1.1
+export AWS_BEDROCK_FORCE_HTTP1=1
 ```
 
 ### Google Vertex AI

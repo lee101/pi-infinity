@@ -2,6 +2,123 @@
 
 ## [Unreleased]
 
+## [0.52.9] - 2026-02-08
+
+### New Features
+
+- Extensions can trigger a full runtime reload via `ctx.reload()`, useful for hot-reloading configuration or restarting the agent. See [docs/extensions.md](docs/extensions.md) and the [`reload-runtime` example](examples/extensions/reload-runtime.ts) ([#1371](https://github.com/badlogic/pi-mono/issues/1371))
+- Short CLI disable aliases: `-ne` (`--no-extensions`), `-ns` (`--no-skills`), and `-np` (`--no-prompt-templates`) for faster interactive usage and scripting.
+- `/export` HTML now includes collapsible tool input schemas (parameter names, types, and descriptions), improving session review and sharing workflows ([#1416](https://github.com/badlogic/pi-mono/pull/1416) by [@marchellodev](https://github.com/marchellodev)).
+- `pi.getAllTools()` now exposes tool parameters in addition to name and description, enabling richer extension integrations ([#1416](https://github.com/badlogic/pi-mono/pull/1416) by [@marchellodev](https://github.com/marchellodev)).
+
+### Added
+
+- Added `ctx.reload()` to the extension API for programmatic runtime reload ([#1371](https://github.com/badlogic/pi-mono/issues/1371))
+- Added short aliases for disable flags: `-ne` for `--no-extensions`, `-ns` for `--no-skills`, `-np` for `--no-prompt-templates`
+- `/export` HTML now includes tool input schema (parameter names, types, descriptions) in a collapsible section under each tool ([#1416](https://github.com/badlogic/pi-mono/pull/1416) by [@marchellodev](https://github.com/marchellodev))
+- `pi.getAllTools()` now returns tool parameters in addition to name and description ([#1416](https://github.com/badlogic/pi-mono/pull/1416) by [@marchellodev](https://github.com/marchellodev))
+
+### Fixed
+
+- Fixed extension source parsing so dot-prefixed local paths (for example `.pi/extensions/foo.ts`) are treated as local paths instead of git URLs
+- Fixed fd/rg download failing on Windows due to `unzip` not being available; now uses `tar` for both `.tar.gz` and `.zip` extraction, with proper error reporting ([#1348](https://github.com/badlogic/pi-mono/issues/1348))
+- Fixed RPC mode documentation incorrectly stating `ctx.hasUI` is `false`; it is `true` because dialog and fire-and-forget UI methods work via the RPC sub-protocol. Also documented missing unsupported/degraded methods (`pasteToEditor`, `getAllThemes`, `getTheme`, `setTheme`) ([#1411](https://github.com/badlogic/pi-mono/pull/1411) by [@aliou](https://github.com/aliou))
+- Fixed `rg` not available in bash tool by downloading it at startup alongside `fd` ([#1348](https://github.com/badlogic/pi-mono/issues/1348))
+- Fixed `custom-compaction` example to use `ModelRegistry` ([#1387](https://github.com/badlogic/pi-mono/issues/1387))
+- Google providers now support full JSON Schema in tool declarations (anyOf, oneOf, const, etc.) ([#1398](https://github.com/badlogic/pi-mono/issues/1398) by [@jarib](https://github.com/jarib))
+- Reverted incorrect Antigravity model change: `claude-opus-4-6-thinking` back to `claude-opus-4-5-thinking` (model does not exist on Antigravity endpoint)
+- Updated the Antigravity system instruction to a more compact version for Google Gemini CLI compatibility
+- Corrected opencode context windows for Claude Sonnet 4 and 4.5 ([#1383](https://github.com/badlogic/pi-mono/issues/1383))
+- Fixed subagent example unknown-agent errors to include available agent names ([#1414](https://github.com/badlogic/pi-mono/pull/1414) by [@dnouri](https://github.com/dnouri))
+
+## [0.52.8] - 2026-02-07
+
+### New Features
+
+- Emacs-style kill ring (`ctrl+k`/`ctrl+y`/`alt+y`) and undo (`ctrl+z`) in the editor input ([#1373](https://github.com/badlogic/pi-mono/pull/1373) by [@Perlence](https://github.com/Perlence))
+- OpenRouter `auto` model alias (`openrouter:auto`) for automatic model routing ([#1361](https://github.com/badlogic/pi-mono/pull/1361) by [@yogasanas](https://github.com/yogasanas))
+- Extensions can programmatically paste content into the editor via `pasteToEditor` in the extension UI context. See [docs/extensions.md](docs/extensions.md) ([#1351](https://github.com/badlogic/pi-mono/pull/1351) by [@kaofelix](https://github.com/kaofelix))
+- `pi <package> --help` and invalid subcommands now show helpful output instead of failing silently ([#1347](https://github.com/badlogic/pi-mono/pull/1347) by [@ferologics](https://github.com/ferologics))
+
+### Added
+
+- Added `pasteToEditor` to extension UI context for programmatic editor paste ([#1351](https://github.com/badlogic/pi-mono/pull/1351) by [@kaofelix](https://github.com/kaofelix))
+- Added package subcommand help and friendly error messages for invalid commands ([#1347](https://github.com/badlogic/pi-mono/pull/1347) by [@ferologics](https://github.com/ferologics))
+- Added OpenRouter `auto` model alias for automatic model routing ([#1361](https://github.com/badlogic/pi-mono/pull/1361) by [@yogasanas](https://github.com/yogasanas))
+- Added kill ring (ctrl+k/ctrl+y/alt+y) and undo (ctrl+z) support to the editor input ([#1373](https://github.com/badlogic/pi-mono/pull/1373) by [@Perlence](https://github.com/Perlence))
+
+### Changed
+
+- Replaced Claude Opus 4.5 with Opus 4.6 as default model ([#1345](https://github.com/badlogic/pi-mono/pull/1345) by [@calvin-hpnet](https://github.com/calvin-hpnet))
+
+### Fixed
+
+- Fixed temporary git package caches (`-e <git-url>`) to refresh on cache hits for unpinned sources, including detached/no-upstream checkouts
+- Fixed aborting retries when an extension customizes the editor ([#1364](https://github.com/badlogic/pi-mono/pull/1364) by [@Perlence](https://github.com/Perlence))
+- Fixed autocomplete not propagating to custom editors created by extensions ([#1372](https://github.com/badlogic/pi-mono/pull/1372) by [@Perlence](https://github.com/Perlence))
+- Fixed extension shutdown to use clean TUI shutdown path, preventing orphaned processes
+
+## [0.52.7] - 2026-02-06
+
+### New Features
+
+- Per-model overrides in `models.json` via `modelOverrides`, allowing customization of built-in provider models without replacing provider model lists. See [docs/models.md#per-model-overrides](docs/models.md#per-model-overrides).
+- `models.json` provider `models` now merge with built-in models by `id`, so custom models can be added or replace matching built-ins without full provider replacement. See [docs/models.md#overriding-built-in-providers](docs/models.md#overriding-built-in-providers).
+- Bedrock proxy support for unauthenticated endpoints via `AWS_BEDROCK_SKIP_AUTH` and `AWS_BEDROCK_FORCE_HTTP1`. See [docs/providers.md](docs/providers.md).
+
+### Breaking Changes
+
+- Changed `models.json` provider `models` behavior from full replacement to merge-by-id with built-in models. Built-in models are now kept by default, and custom models upsert by `id`.
+
+### Added
+
+- Added `modelOverrides` in `models.json` to customize individual built-in models per provider without full provider replacement ([#1332](https://github.com/badlogic/pi-mono/pull/1332) by [@charles-cooper](https://github.com/charles-cooper))
+- Added `AWS_BEDROCK_SKIP_AUTH` and `AWS_BEDROCK_FORCE_HTTP1` environment variables for connecting to unauthenticated Bedrock proxies ([#1320](https://github.com/badlogic/pi-mono/pull/1320) by [@virtuald](https://github.com/virtuald))
+
+### Fixed
+
+- Fixed extra spacing between thinking-only assistant content and subsequent tool execution blocks when assistant messages contain no text
+- Fixed queued steering/follow-up/custom messages remaining stuck after threshold auto-compaction by resuming the agent loop when Agent-level queues still contain pending messages ([#1312](https://github.com/badlogic/pi-mono/pull/1312) by [@ferologics](https://github.com/ferologics))
+- Fixed `tool_result` extension handlers to chain result patches across handlers instead of last-handler-wins behavior ([#1280](https://github.com/badlogic/pi-mono/issues/1280))
+- Fixed compromised auth lock files being handled gracefully instead of crashing auth storage initialization ([#1322](https://github.com/badlogic/pi-mono/issues/1322))
+- Fixed Bedrock adaptive thinking handling for Claude Opus 4.6 with interleaved thinking beta responses ([#1323](https://github.com/badlogic/pi-mono/pull/1323) by [@markusylisiurunen](https://github.com/markusylisiurunen))
+- Fixed OpenAI Responses API requests to use `store: false` by default to avoid server-side history logging ([#1308](https://github.com/badlogic/pi-mono/issues/1308))
+- Fixed interactive mode startup by initializing autocomplete after resources are loaded ([#1328](https://github.com/badlogic/pi-mono/issues/1328))
+- Fixed `modelOverrides` merge behavior for nested objects and documented usage details ([#1062](https://github.com/badlogic/pi-mono/issues/1062))
+
+## [0.52.6] - 2026-02-05
+
+### Breaking Changes
+
+- Removed `/exit` command handling. Use `/quit` to exit ([#1303](https://github.com/badlogic/pi-mono/issues/1303))
+
+### Fixed
+
+- Fixed `/quit` being shadowed by fuzzy slash command autocomplete matches from skills by adding `/quit` to built-in command autocomplete ([#1303](https://github.com/badlogic/pi-mono/issues/1303))
+- Fixed local package source parsing and settings normalization regression that misclassified relative paths as git URLs and prevented globally installed local packages from loading after restart ([#1304](https://github.com/badlogic/pi-mono/issues/1304))
+
+## [0.52.5] - 2026-02-05
+
+### Fixed
+
+- Fixed thinking level capability detection so Anthropic Opus 4.6 models expose `xhigh` in selectors and cycling
+
+## [0.52.4] - 2026-02-05
+
+### Fixed
+
+- Fixed extensions setting not respecting `package.json` `pi.extensions` manifest when directory is specified directly ([#1302](https://github.com/badlogic/pi-mono/pull/1302) by [@hjanuschka](https://github.com/hjanuschka))
+
+## [0.52.3] - 2026-02-05
+
+### Fixed
+
+- Fixed git package parsing fallback for unknown hosts so enterprise git sources like `git:github.tools.sap/org/repo` are treated as git packages instead of local paths
+- Fixed git package `@ref` parsing for shorthand, HTTPS, and SSH source formats, including branch refs with slashes
+- Fixed Bedrock default model ID from `us.anthropic.claude-opus-4-6-v1:0` to `us.anthropic.claude-opus-4-6-v1`
+- Fixed Bedrock Opus 4.6 model metadata (IDs, cache pricing) and added missing EU profile
+- Fixed Claude Opus 4.6 context window metadata to 200000 for Anthropic and OpenCode providers
+
 ## [0.52.2] - 2026-02-05
 
 ### Changed

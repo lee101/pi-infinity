@@ -56,6 +56,7 @@ import {
 	type SessionBeforeTreeResult,
 	type ShutdownHandler,
 	type ToolDefinition,
+	type ToolInfo,
 	type TreePreparation,
 	type TurnEndEvent,
 	type TurnStartEvent,
@@ -548,12 +549,13 @@ export class AgentSession {
 	}
 
 	/**
-	 * Get all configured tools with name and description.
+	 * Get all configured tools with name, description, and parameter schema.
 	 */
-	getAllTools(): Array<{ name: string; description: string }> {
+	getAllTools(): ToolInfo[] {
 		return Array.from(this._toolRegistry.values()).map((t) => ({
 			name: t.name,
 			description: t.description,
+			parameters: t.parameters,
 		}));
 	}
 
@@ -1684,6 +1686,12 @@ export class AgentSession {
 					this.agent.replaceMessages(messages.slice(0, -1));
 				}
 
+				setTimeout(() => {
+					this.agent.continue().catch(() => {});
+				}, 100);
+			} else if (this.agent.hasQueuedMessages()) {
+				// Auto-compaction can complete while follow-up/steering/custom messages are waiting.
+				// Kick the loop so queued messages are actually delivered.
 				setTimeout(() => {
 					this.agent.continue().catch(() => {});
 				}, 100);
