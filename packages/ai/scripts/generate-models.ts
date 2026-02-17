@@ -519,13 +519,21 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 				if (m.tool_call !== true) continue;
 				if (m.status === "deprecated") continue;
 
+				// Claude 4.x models route to Anthropic Messages API
+				const isCopilotClaude4 = /^claude-(haiku|sonnet|opus)-4([.\-]|$)/.test(modelId);
 				// gpt-5 models require responses API, others use completions
 				const needsResponsesApi = modelId.startsWith("gpt-5") || modelId.startsWith("oswe");
+
+				const api: Api = isCopilotClaude4
+					? "anthropic-messages"
+					: needsResponsesApi
+						? "openai-responses"
+						: "openai-completions";
 
 				const copilotModel: Model<any> = {
 					id: modelId,
 					name: m.name || modelId,
-					api: needsResponsesApi ? "openai-responses" : "openai-completions",
+					api,
 					provider: "github-copilot",
 					baseUrl: "https://api.individual.githubcopilot.com",
 					reasoning: m.reasoning === true,
@@ -540,13 +548,13 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					maxTokens: m.limit?.output || 8192,
 					headers: { ...COPILOT_STATIC_HEADERS },
 					// compat only applies to openai-completions
-					...(needsResponsesApi ? {} : {
+					...(api === "openai-completions" ? {
 						compat: {
 							supportsStore: false,
 							supportsDeveloperRole: false,
 							supportsReasoningEffort: false,
 						},
-					}),
+					} : {}),
 				};
 
 				models.push(copilotModel);
@@ -761,6 +769,26 @@ async function generateModels() {
 		});
 	}
 
+	if (!allModels.some(m => m.provider === "openai" && m.id === "gpt-5.3-codex-spark")) {
+		allModels.push({
+			id: "gpt-5.3-codex-spark",
+			name: "GPT-5.3 Codex Spark",
+			api: "openai-responses",
+			baseUrl: "https://api.openai.com/v1",
+			provider: "openai",
+			reasoning: true,
+			input: ["text"],
+			cost: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+			},
+			contextWindow: 128000,
+			maxTokens: 16384,
+		});
+	}
+
 	// OpenAI Codex (ChatGPT OAuth) models
 	// NOTE: These are not fetched from models.dev; we keep a small, explicit list to avoid aliases.
 	// Context window is based on observed server limits (400s above ~272k), not marketing numbers.
@@ -838,6 +866,18 @@ async function generateModels() {
 			input: ["text", "image"],
 			cost: { input: 1.75, output: 14, cacheRead: 0.175, cacheWrite: 0 },
 			contextWindow: CODEX_CONTEXT,
+			maxTokens: CODEX_MAX_TOKENS,
+		},
+		{
+			id: "gpt-5.3-codex-spark",
+			name: "GPT-5.3 Codex Spark",
+			api: "openai-codex-responses",
+			provider: "openai-codex",
+			baseUrl: CODEX_BASE_URL,
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128000,
 			maxTokens: CODEX_MAX_TOKENS,
 		},
 	];

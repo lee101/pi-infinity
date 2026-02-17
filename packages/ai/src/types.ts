@@ -53,11 +53,18 @@ export interface ThinkingBudgets {
 // Base options all providers share
 export type CacheRetention = "none" | "short" | "long";
 
+export type Transport = "sse" | "websocket" | "auto";
+
 export interface StreamOptions {
 	temperature?: number;
 	maxTokens?: number;
 	signal?: AbortSignal;
 	apiKey?: string;
+	/**
+	 * Preferred transport for providers that support multiple transports.
+	 * Providers that do not support this option ignore it.
+	 */
+	transport?: Transport;
 	/**
 	 * Prompt cache retention preference. Providers map this to their supported values.
 	 * Default: "short".
@@ -87,6 +94,12 @@ export interface StreamOptions {
 	 * Default: 60000 (60 seconds). Set to 0 to disable the cap.
 	 */
 	maxRetryDelayMs?: number;
+	/**
+	 * Optional metadata to include in API requests.
+	 * Providers extract the fields they understand and ignore the rest.
+	 * For example, Anthropic uses `user_id` for abuse tracking and rate limiting.
+	 */
+	metadata?: Record<string, unknown>;
 }
 
 export type ProviderStreamOptions = StreamOptions & Record<string, unknown>;

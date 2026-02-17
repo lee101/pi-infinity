@@ -195,7 +195,7 @@ ${chalk.bold("Commands:")}
 
 ${chalk.bold("Options:")}
   --provider <name>              Provider name (default: google)
-  --model <id>                   Model ID (default: gemini-2.5-flash)
+  --model <pattern>              Model pattern or ID (supports "provider/id" and optional ":<thinking>")
   --api-key <key>                API key (defaults to env vars)
   --system-prompt <text>         System prompt (default: coding assistant prompt)
   --append-system-prompt <text>  Append text or file contents to the system prompt
@@ -251,6 +251,12 @@ ${chalk.bold("Examples:")}
 
   # Use different model
   ${APP_NAME} --provider openai --model gpt-4o-mini "Help me refactor this code"
+
+  # Use model with provider prefix (no --provider needed)
+  ${APP_NAME} --model openai/gpt-4o "Help me refactor this code"
+
+  # Use model with thinking level shorthand
+  ${APP_NAME} --model sonnet:high "Solve this complex problem"
 
   # Limit model cycling to specific models
   ${APP_NAME} --models claude-sonnet,claude-haiku,gpt-4o

@@ -1,3 +1,11 @@
+# 🏖️ OSS Vacation
+
+**Issue tracker and PRs reopen February 23, 2026.**
+
+All PRs will be auto-closed until then. Approved contributors can submit PRs after vacation without reapproval. For support, join [Discord](https://discord.com/invite/3cU7Bz4UPx).
+
+---
+
 <p align="center">
   <a href="https://shittycodingagent.ai">
     <img src="https://shittycodingagent.ai/logo.svg" alt="pi logo" width="128">
@@ -142,7 +150,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/login`, `/logout` | OAuth authentication |
 | `/model` | Switch models |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
-| `/settings` | Thinking level, theme, message delivery |
+| `/settings` | Thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
 | `/new` | Start a new session |
 | `/name <name>` | Set session display name |
@@ -185,7 +193,7 @@ Submit messages while the agent is working:
 - **Escape** aborts and restores queued messages to editor
 - **Alt+Up** retrieves queued messages back to editor
 
-Configure delivery in [settings](docs/settings.md): `steeringMode` and `followUpMode` can be `"one-at-a-time"` (default, waits for response) or `"all"` (delivers all queued at once).
+Configure delivery in [settings](docs/settings.md): `steeringMode` and `followUpMode` can be `"one-at-a-time"` (default, waits for response) or `"all"` (delivers all queued at once). `transport` selects provider transport preference (`"sse"`, `"websocket"`, or `"auto"`) for providers that support multiple transports.
 
 ---
 
@@ -333,7 +341,12 @@ pinf install npm:@foo/pi-tools
 pinf install npm:@foo/pi-tools@1.2.3      # pinned version
 pinf install git:github.com/user/repo
 pinf install git:github.com/user/repo@v1  # tag or commit
+pinf install git:git@github.com:user/repo
+pinf install git:git@github.com:user/repo@v1  # tag or commit
 pinf install https://github.com/user/repo
+pinf install https://github.com/user/repo@v1      # tag or commit
+pinf install ssh://git@github.com/user/repo
+pinf install ssh://git@github.com/user/repo@v1    # tag or commit
 pinf remove npm:@foo/pi-tools
 pinf list
 pinf update                               # skips pinned packages
@@ -444,7 +457,7 @@ pinf config                   # Enable/disable package resources
 | Option | Description |
 |--------|-------------|
 | `--provider <name>` | Provider (anthropic, openai, google, etc.) |
-| `--model <id>` | Model ID |
+| `--model <pattern>` | Model pattern or ID (supports `provider/id` and optional `:<thinking>`) |
 | `--api-key <key>` | API key (overrides env vars) |
 | `--thinking <level>` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `--models <patterns>` | Comma-separated patterns for Ctrl+P cycling |
@@ -515,6 +528,12 @@ pinf -p "Summarize this codebase"
 
 # Different model
 pinf --provider openai --model gpt-4o "Help me refactor"
+
+# Model with provider prefix (no --provider needed)
+pi --model openai/gpt-4o "Help me refactor"
+
+# Model with thinking level shorthand
+pi --model sonnet:high "Solve this complex problem"
 
 # Limit model cycling
 pinf --models "claude-*,gpt-4o"

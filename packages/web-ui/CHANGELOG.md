@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.52.12] - 2026-02-13
+
+## [0.52.11] - 2026-02-13
+
+## [0.52.10] - 2026-02-12
+
+### Fixed
+
+- Made model selector search case-insensitive by normalizing query tokens, fixing auto-capitalized mobile input filtering ([#1443](https://github.com/badlogic/pi-mono/issues/1443))
+
 ## [0.52.9] - 2026-02-08
 
 ## [0.52.8] - 2026-02-07
