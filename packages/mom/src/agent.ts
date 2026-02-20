@@ -9,7 +9,7 @@ import {
 	type ResourceLoader,
 	SessionManager,
 	type Skill,
-} from "@codex-infinity/pinf";
+} from "@codex-infinity/pi-infinity";
 import { Agent, type AgentEvent } from "@mariozechner/pi-agent-core";
 import { getModel, type ImageContent } from "@mariozechner/pi-ai";
 import { existsSync, readFileSync } from "fs";

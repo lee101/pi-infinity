@@ -1,5 +1,5 @@
 {
-	"name": "@codex-infinity/pinf",
+	"name": "@codex-infinity/pi-infinity",
 	"version": "0.52.2",
 	"description": "Coding agent CLI with read, bash, edit, write tools and session management",
 	"type": "module",

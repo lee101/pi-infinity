@@ -10,7 +10,7 @@
  * - MomSettingsManager: Simple settings for mom (compaction, retry, model preferences)
  */
 
-import type { SessionManager, SessionMessageEntry } from "@codex-infinity/pinf";
+import type { SessionManager, SessionMessageEntry } from "@codex-infinity/pi-infinity";
 import type { UserMessage } from "@mariozechner/pi-ai";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
