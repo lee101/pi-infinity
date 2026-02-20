@@ -416,11 +416,13 @@ function buildParams(
 type ClampedThinkingLevel = Exclude<PiThinkingLevel, "xhigh">;
 
 function isGemini3ProModel(model: Model<"google-generative-ai">): boolean {
-	return model.id.includes("3-pro");
+	const normalized = model.id.toLowerCase();
+	return normalized.includes("3-pro") || normalized.includes("3.1-pro");
 }
 
 function isGemini3FlashModel(model: Model<"google-generative-ai">): boolean {
-	return model.id.includes("3-flash");
+	const normalized = model.id.toLowerCase();
+	return normalized.includes("3-flash") || normalized.includes("3.1-flash");
 }
 
 function getGemini3ThinkingLevel(

@@ -794,7 +794,7 @@ export const streamSimpleGoogleGeminiCli: StreamFunction<"google-gemini-cli", Si
 	}
 
 	const effort = clampReasoning(options.reasoning)!;
-	if (model.id.includes("3-pro") || model.id.includes("3-flash")) {
+	if (isGemini3ProModel(model.id) || isGemini3FlashModel(model.id)) {
 		return streamGoogleGeminiCli(model, context, {
 			...base,
 			thinking: {
@@ -917,7 +917,7 @@ export function buildRequest(
 type ClampedThinkingLevel = Exclude<ThinkingLevel, "xhigh">;
 
 function getGeminiCliThinkingLevel(effort: ClampedThinkingLevel, modelId: string): GoogleThinkingLevel {
-	if (modelId.includes("3-pro")) {
+	if (isGemini3ProModel(modelId)) {
 		switch (effort) {
 			case "minimal":
 			case "low":
@@ -937,4 +937,14 @@ function getGeminiCliThinkingLevel(effort: ClampedThinkingLevel, modelId: string
 		case "high":
 			return "HIGH";
 	}
+}
+
+function isGemini3ProModel(modelId: string): boolean {
+	const normalized = modelId.toLowerCase();
+	return normalized.includes("3-pro") || normalized.includes("3.1-pro");
+}
+
+function isGemini3FlashModel(modelId: string): boolean {
+	const normalized = modelId.toLowerCase();
+	return normalized.includes("3-flash") || normalized.includes("3.1-flash");
 }
