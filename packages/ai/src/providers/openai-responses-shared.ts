@@ -2,6 +2,7 @@ import type OpenAI from "openai";
 import type {
 	Tool as OpenAITool,
 	ResponseCreateParamsStreaming,
+	ResponseFunctionCallOutputItemList,
 	ResponseFunctionToolCall,
 	ResponseInput,
 	ResponseInputContent,
@@ -20,12 +21,14 @@ import type {
 	Model,
 	StopReason,
 	TextContent,
+	TextSignatureV1,
 	ThinkingContent,
 	Tool,
 	ToolCall,
 	Usage,
 } from "../types.js";
 import type { AssistantMessageEventStream } from "../utils/event-stream.js";
+import { shortHash } from "../utils/hash.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import { transformMessages } from "./transform-messages.js";
@@ -34,18 +37,30 @@ import { transformMessages } from "./transform-messages.js";
 // Utilities
 // =============================================================================
 
-/** Fast deterministic hash to shorten long strings */
-function shortHash(str: string): string {
-	let h1 = 0xdeadbeef;
-	let h2 = 0x41c6ce57;
-	for (let i = 0; i < str.length; i++) {
-		const ch = str.charCodeAt(i);
-		h1 = Math.imul(h1 ^ ch, 2654435761);
-		h2 = Math.imul(h2 ^ ch, 1597334677);
+function encodeTextSignatureV1(id: string, phase?: TextSignatureV1["phase"]): string {
+	const payload: TextSignatureV1 = { v: 1, id };
+	if (phase) payload.phase = phase;
+	return JSON.stringify(payload);
+}
+
+function parseTextSignature(
+	signature: string | undefined,
+): { id: string; phase?: TextSignatureV1["phase"] } | undefined {
+	if (!signature) return undefined;
+	if (signature.startsWith("{")) {
+		try {
+			const parsed = JSON.parse(signature) as Partial<TextSignatureV1>;
+			if (parsed.v === 1 && typeof parsed.id === "string") {
+				if (parsed.phase === "commentary" || parsed.phase === "final_answer") {
+					return { id: parsed.id, phase: parsed.phase };
+				}
+				return { id: parsed.id };
+			}
+		} catch {
+			// Fall through to legacy plain-string handling.
+		}
 	}
-	h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-	h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-	return (h2 >>> 0).toString(36) + (h1 >>> 0).toString(36);
+	return { id: signature };
 }
 
 export interface OpenAIResponsesStreamOptions {
@@ -76,21 +91,22 @@ export function convertResponsesMessages<TApi extends Api>(
 ): ResponseInput {
 	const messages: ResponseInput = [];
 
+	const normalizeIdPart = (part: string): string => {
+		const sanitized = part.replace(/[^a-zA-Z0-9_-]/g, "_");
+		const normalized = sanitized.length > 64 ? sanitized.slice(0, 64) : sanitized;
+		return normalized.replace(/_+$/, "");
+	};
+
 	const normalizeToolCallId = (id: string): string => {
-		if (!allowedToolCallProviders.has(model.provider)) return id;
-		if (!id.includes("|")) return id;
+		if (!allowedToolCallProviders.has(model.provider)) return normalizeIdPart(id);
+		if (!id.includes("|")) return normalizeIdPart(id);
 		const [callId, itemId] = id.split("|");
-		const sanitizedCallId = callId.replace(/[^a-zA-Z0-9_-]/g, "_");
-		let sanitizedItemId = itemId.replace(/[^a-zA-Z0-9_-]/g, "_");
+		const normalizedCallId = normalizeIdPart(callId);
+		let normalizedItemId = normalizeIdPart(itemId);
 		// OpenAI Responses API requires item id to start with "fc"
-		if (!sanitizedItemId.startsWith("fc")) {
-			sanitizedItemId = `fc_${sanitizedItemId}`;
+		if (!normalizedItemId.startsWith("fc")) {
+			normalizedItemId = normalizeIdPart(`fc_${normalizedItemId}`);
 		}
-		// Truncate to 64 chars and strip trailing underscores (OpenAI Codex rejects them)
-		let normalizedCallId = sanitizedCallId.length > 64 ? sanitizedCallId.slice(0, 64) : sanitizedCallId;
-		let normalizedItemId = sanitizedItemId.length > 64 ? sanitizedItemId.slice(0, 64) : sanitizedItemId;
-		normalizedCallId = normalizedCallId.replace(/_+$/, "");
-		normalizedItemId = normalizedItemId.replace(/_+$/, "");
 		return `${normalizedCallId}|${normalizedItemId}`;
 	};
 
@@ -152,8 +168,9 @@ export function convertResponsesMessages<TApi extends Api>(
 					}
 				} else if (block.type === "text") {
 					const textBlock = block as TextContent;
+					const parsedSignature = parseTextSignature(textBlock.textSignature);
 					// OpenAI requires id to be max 64 characters
-					let msgId = textBlock.textSignature;
+					let msgId = parsedSignature?.id;
 					if (!msgId) {
 						msgId = `msg_${msgIndex}`;
 					} else if (msgId.length > 64) {
@@ -165,6 +182,7 @@ export function convertResponsesMessages<TApi extends Api>(
 						content: [{ type: "output_text", text: sanitizeSurrogates(textBlock.text), annotations: [] }],
 						status: "completed",
 						id: msgId,
+						phase: parsedSignature?.phase,
 					} satisfies ResponseOutputMessage);
 				} else if (block.type === "toolCall") {
 					const toolCall = block as ToolCall;
@@ -190,48 +208,45 @@ export function convertResponsesMessages<TApi extends Api>(
 			if (output.length === 0) continue;
 			messages.push(...output);
 		} else if (msg.role === "toolResult") {
-			// Extract text and image content
 			const textResult = msg.content
 				.filter((c): c is TextContent => c.type === "text")
 				.map((c) => c.text)
 				.join("\n");
 			const hasImages = msg.content.some((c): c is ImageContent => c.type === "image");
-
-			// Always send function_call_output with text (or placeholder if only images)
 			const hasText = textResult.length > 0;
 			const [callId] = msg.toolCallId.split("|");
-			messages.push({
-				type: "function_call_output",
-				call_id: callId,
-				output: sanitizeSurrogates(hasText ? textResult : "(see attached image)"),
-			});
 
-			// If there are images and model supports them, send a follow-up user message with images
+			let output: string | ResponseFunctionCallOutputItemList;
 			if (hasImages && model.input.includes("image")) {
-				const contentParts: ResponseInputContent[] = [];
+				const contentParts: ResponseFunctionCallOutputItemList = [];
 
-				// Add text prefix
-				contentParts.push({
-					type: "input_text",
-					text: "Attached image(s) from tool result:",
-				} satisfies ResponseInputText);
+				if (hasText) {
+					contentParts.push({
+						type: "input_text",
+						text: sanitizeSurrogates(textResult),
+					});
+				}
 
-				// Add images
 				for (const block of msg.content) {
 					if (block.type === "image") {
 						contentParts.push({
 							type: "input_image",
 							detail: "auto",
 							image_url: `data:${block.mimeType};base64,${block.data}`,
-						} satisfies ResponseInputImage);
+						});
 					}
 				}
 
-				messages.push({
-					role: "user",
-					content: contentParts,
-				});
+				output = contentParts;
+			} else {
+				output = sanitizeSurrogates(hasText ? textResult : "(see attached image)");
 			}
+
+			messages.push({
+				type: "function_call_output",
+				call_id: callId,
+				output,
+			});
 		}
 		msgIndex++;
 	}
@@ -271,7 +286,9 @@ export async function processResponsesStream<TApi extends Api>(
 	const blockIndex = () => blocks.length - 1;
 
 	for await (const event of openaiStream) {
-		if (event.type === "response.output_item.added") {
+		if (event.type === "response.created") {
+			output.responseId = event.response.id;
+		} else if (event.type === "response.output_item.added") {
 			const item = event.item;
 			if (item.type === "reasoning") {
 				currentItem = item;
@@ -403,7 +420,7 @@ export async function processResponsesStream<TApi extends Api>(
 				currentBlock = null;
 			} else if (item.type === "message" && currentBlock?.type === "text") {
 				currentBlock.text = item.content.map((c) => (c.type === "output_text" ? c.text : c.refusal)).join("");
-				currentBlock.textSignature = item.id;
+				currentBlock.textSignature = encodeTextSignatureV1(item.id, item.phase ?? undefined);
 				stream.push({
 					type: "text_end",
 					contentIndex: blockIndex(),
@@ -428,6 +445,9 @@ export async function processResponsesStream<TApi extends Api>(
 			}
 		} else if (event.type === "response.completed") {
 			const response = event.response;
+			if (response?.id) {
+				output.responseId = response.id;
+			}
 			if (response?.usage) {
 				const cachedTokens = response.usage.input_tokens_details?.cached_tokens || 0;
 				output.usage = {
@@ -453,7 +473,14 @@ export async function processResponsesStream<TApi extends Api>(
 		} else if (event.type === "error") {
 			throw new Error(`Error Code ${event.code}: ${event.message}` || "Unknown error");
 		} else if (event.type === "response.failed") {
-			throw new Error("Unknown error");
+			const error = event.response?.error;
+			const details = event.response?.incomplete_details;
+			const msg = error
+				? `${error.code || "unknown"}: ${error.message || "no message"}`
+				: details?.reason
+					? `incomplete: ${details.reason}`
+					: "Unknown error (no error details in response)";
+			throw new Error(msg);
 		}
 	}
 }

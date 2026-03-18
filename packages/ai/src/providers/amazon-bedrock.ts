@@ -88,13 +88,20 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
 		const blocks = output.content as Block[];
 
 		const config: BedrockRuntimeClientConfig = {
-			region: options.region,
 			profile: options.profile,
 		};
 
 		// in Node.js/Bun environment only
 		if (typeof process !== "undefined" && (process.versions?.node || process.versions?.bun)) {
-			config.region = config.region || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
+			// Region resolution: explicit option > env vars > SDK default chain.
+			// When AWS_PROFILE is set, we leave region undefined so the SDK can
+			// resovle it from aws profile configs. Otherwise fall back to us-east-1.
+			const explicitRegion = options.region || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
+			if (explicitRegion) {
+				config.region = explicitRegion;
+			} else if (!process.env.AWS_PROFILE) {
+				config.region = "us-east-1";
+			}
 
 			// Support proxies that don't need authentication
 			if (process.env.AWS_BEDROCK_SKIP_AUTH === "1") {
@@ -129,15 +136,17 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
 				const nodeHttpHandler = await import("@smithy/node-http-handler");
 				config.requestHandler = new nodeHttpHandler.NodeHttpHandler();
 			}
+		} else {
+			// Non-Node environment (browser): fall back to us-east-1 since
+			// there's no config file resolution available.
+			config.region = options.region || "us-east-1";
 		}
-
-		config.region = config.region || "us-east-1";
 
 		try {
 			const client = new BedrockRuntimeClient(config);
 
 			const cacheRetention = resolveCacheRetention(options.cacheRetention);
-			const commandInput = {
+			let commandInput = {
 				modelId: model.id,
 				messages: convertMessages(context, model, cacheRetention),
 				system: buildSystemPrompt(context.systemPrompt, model, cacheRetention),
@@ -145,7 +154,10 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
 				toolConfig: convertToolConfig(context.tools, options.toolChoice),
 				additionalModelRequestFields: buildAdditionalModelRequestFields(model, options),
 			};
-			options?.onPayload?.(commandInput);
+			const nextCommandInput = await options?.onPayload?.(commandInput, model);
+			if (nextCommandInput !== undefined) {
+				commandInput = nextCommandInput as typeof commandInput;
+			}
 			const command = new ConverseStreamCommand(commandInput);
 
 			const response = await client.send(command, { abortSignal: options.signal });
@@ -371,13 +383,21 @@ function handleContentBlockStop(
 }
 
 /**
- * Check if the model supports adaptive thinking (Opus 4.6+).
+ * Check if the model supports adaptive thinking (Opus 4.6 and Sonnet 4.6).
  */
 function supportsAdaptiveThinking(modelId: string): boolean {
-	return modelId.includes("opus-4-6") || modelId.includes("opus-4.6");
+	return (
+		modelId.includes("opus-4-6") ||
+		modelId.includes("opus-4.6") ||
+		modelId.includes("sonnet-4-6") ||
+		modelId.includes("sonnet-4.6")
+	);
 }
 
-function mapThinkingLevelToEffort(level: SimpleStreamOptions["reasoning"]): "low" | "medium" | "high" | "max" {
+function mapThinkingLevelToEffort(
+	level: SimpleStreamOptions["reasoning"],
+	modelId: string,
+): "low" | "medium" | "high" | "max" {
 	switch (level) {
 		case "minimal":
 		case "low":
@@ -387,7 +407,7 @@ function mapThinkingLevelToEffort(level: SimpleStreamOptions["reasoning"]): "low
 		case "high":
 			return "high";
 		case "xhigh":
-			return "max";
+			return modelId.includes("opus-4-6") || modelId.includes("opus-4.6") ? "max" : "high";
 		default:
 			return "high";
 	}
@@ -410,15 +430,24 @@ function resolveCacheRetention(cacheRetention?: CacheRetention): CacheRetention 
 /**
  * Check if the model supports prompt caching.
  * Supported: Claude 3.5 Haiku, Claude 3.7 Sonnet, Claude 4.x models
+ *
+ * For base models and system-defined inference profiles the model ID / ARN
+ * contains the model name, so we can decide locally.
+ *
+ * For application inference profiles (whose ARNs don't contain the model name),
+ * set AWS_BEDROCK_FORCE_CACHE=1 to enable cache points.  Amazon Nova models
+ * have automatic caching and don't need explicit cache points.
  */
 function supportsPromptCaching(model: Model<"bedrock-converse-stream">): boolean {
-	if (model.cost.cacheRead || model.cost.cacheWrite) {
-		return true;
-	}
-
 	const id = model.id.toLowerCase();
+	if (!id.includes("claude")) {
+		// Application inference profiles don't contain the model name in the ARN.
+		// Allow users to force cache points via environment variable.
+		if (typeof process !== "undefined" && process.env.AWS_BEDROCK_FORCE_CACHE === "1") return true;
+		return false;
+	}
 	// Claude 4.x models (opus-4, sonnet-4, haiku-4)
-	if (id.includes("claude") && (id.includes("-4-") || id.includes("-4."))) return true;
+	if (id.includes("-4-") || id.includes("-4.")) return true;
 	// Claude 3.7 Sonnet
 	if (id.includes("claude-3-7-sonnet")) return true;
 	// Claude 3.5 Haiku
@@ -517,11 +546,21 @@ function convertMessages(
 							// For other models, we omit the signature to avoid errors like:
 							// "This model doesn't support the reasoningContent.reasoningText.signature field"
 							if (supportsThinkingSignature(model)) {
-								contentBlocks.push({
-									reasoningContent: {
-										reasoningText: { text: sanitizeSurrogates(c.thinking), signature: c.thinkingSignature },
-									},
-								});
+								// Signatures arrive after thinking deltas. If a partial or externally
+								// persisted message lacks a signature, Bedrock rejects the replayed
+								// reasoning block. Fall back to plain text, matching Anthropic.
+								if (!c.thinkingSignature || c.thinkingSignature.trim().length === 0) {
+									contentBlocks.push({ text: sanitizeSurrogates(c.thinking) });
+								} else {
+									contentBlocks.push({
+										reasoningContent: {
+											reasoningText: {
+												text: sanitizeSurrogates(c.thinking),
+												signature: c.thinkingSignature,
+											},
+										},
+									});
+								}
 							} else {
 								contentBlocks.push({
 									reasoningContent: {
@@ -668,7 +707,7 @@ function buildAdditionalModelRequestFields(
 		const result: Record<string, any> = supportsAdaptiveThinking(model.id)
 			? {
 					thinking: { type: "adaptive" },
-					output_config: { effort: mapThinkingLevelToEffort(options.reasoning) },
+					output_config: { effort: mapThinkingLevelToEffort(options.reasoning, model.id) },
 				}
 			: (() => {
 					const defaultBudgets: Record<ThinkingLevel, number> = {

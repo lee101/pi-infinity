@@ -24,6 +24,17 @@ Common options:
 
 All commands support an optional `id` field for request/response correlation. If provided, the corresponding response will include the same `id`.
 
+### Framing
+
+RPC mode uses strict JSONL semantics with LF (`\n`) as the only record delimiter.
+
+This matters for clients:
+- Split records on `\n` only
+- Accept optional `\r\n` input by stripping a trailing `\r`
+- Do not use generic line readers that treat Unicode separators as newlines
+
+In particular, Node `readline` is not protocol-compliant for RPC mode because it also splits on `U+2028` and `U+2029`, which are valid inside JSON strings.
+
 ## Commands
 
 ### Prompting
@@ -47,7 +58,7 @@ With images:
 {"type": "prompt", "message": "New instruction", "streamingBehavior": "steer"}
 ```
 
-- `"steer"`: Interrupt the agent mid-run. Message is delivered after current tool execution, remaining tools are skipped.
+- `"steer"`: Queue the message while the agent is running. It is delivered after the current assistant turn finishes executing its tool calls, before the next LLM call.
 - `"followUp"`: Wait until the agent finishes. Message is delivered only when agent stops.
 
 If the agent is streaming and no `streamingBehavior` is specified, the command returns an error.
@@ -65,7 +76,7 @@ The `images` field is optional. Each image uses `ImageContent` format: `{"type":
 
 #### steer
 
-Queue a steering message to interrupt the agent mid-run. Delivered after current tool execution, remaining tools are skipped. Skill commands and prompt templates are expanded. Extension commands are not allowed (use `prompt` instead).
+Queue a steering message while the agent is running. It is delivered after the current assistant turn finishes executing its tool calls, before the next LLM call. Skill commands and prompt templates are expanded. Extension commands are not allowed (use `prompt` instead).
 
 ```json
 {"type": "steer", "message": "Stop and do this instead"}
@@ -310,8 +321,8 @@ Control how steering messages (from `steer`) are delivered.
 ```
 
 Modes:
-- `"all"`: Deliver all steering messages at the next interruption point
-- `"one-at-a-time"`: Deliver one steering message per interruption (default)
+- `"all"`: Deliver all steering messages after the current assistant turn finishes executing its tool calls
+- `"one-at-a-time"`: Deliver one steering message per completed assistant turn (default)
 
 Response:
 ```json
@@ -1292,13 +1303,39 @@ For a complete example of handling the extension UI protocol, see [`examples/rpc
 
 ```javascript
 const { spawn } = require("child_process");
-const readline = require("readline");
+const { StringDecoder } = require("string_decoder");
 
 const agent = spawn("pi", ["--mode", "rpc", "--no-session"]);
 
-readline.createInterface({ input: agent.stdout }).on("line", (line) => {
+function attachJsonlReader(stream, onLine) {
+    const decoder = new StringDecoder("utf8");
+    let buffer = "";
+
+    stream.on("data", (chunk) => {
+        buffer += typeof chunk === "string" ? chunk : decoder.write(chunk);
+
+        while (true) {
+            const newlineIndex = buffer.indexOf("\n");
+            if (newlineIndex === -1) break;
+
+            let line = buffer.slice(0, newlineIndex);
+            buffer = buffer.slice(newlineIndex + 1);
+            if (line.endsWith("\r")) line = line.slice(0, -1);
+            onLine(line);
+        }
+    });
+
+    stream.on("end", () => {
+        buffer += decoder.end();
+        if (buffer.length > 0) {
+            onLine(buffer.endsWith("\r") ? buffer.slice(0, -1) : buffer);
+        }
+    });
+}
+
+attachJsonlReader(agent.stdout, (line) => {
     const event = JSON.parse(line);
-    
+
     if (event.type === "message_update") {
         const { assistantMessageEvent } = event;
         if (assistantMessageEvent.type === "text_delta") {

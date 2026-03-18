@@ -74,8 +74,11 @@ export const streamGoogle: StreamFunction<"google-generative-ai", GoogleOptions>
 		try {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
 			const client = createClient(model, apiKey, options?.headers);
-			const params = buildParams(model, context, options);
-			options?.onPayload?.(params);
+			let params = buildParams(model, context, options);
+			const nextParams = await options?.onPayload?.(params, model);
+			if (nextParams !== undefined) {
+				params = nextParams as GenerateContentParameters;
+			}
 			const googleStream = await client.models.generateContentStream(params);
 
 			stream.push({ type: "start", partial: output });
@@ -83,6 +86,9 @@ export const streamGoogle: StreamFunction<"google-generative-ai", GoogleOptions>
 			const blocks = output.content;
 			const blockIndex = () => blocks.length - 1;
 			for await (const chunk of googleStream) {
+				// @google/genai documents GenerateContentResponse.responseId as an output-only field
+				// used to identify each response. Keep the first non-empty one from the stream.
+				output.responseId ||= chunk.responseId;
 				const candidate = chunk.candidates?.[0];
 				if (candidate?.content?.parts) {
 					for (const part of candidate.content.parts) {
@@ -386,13 +392,11 @@ function buildParams(
 type ClampedThinkingLevel = Exclude<ThinkingLevel, "xhigh">;
 
 function isGemini3ProModel(model: Model<"google-generative-ai">): boolean {
-	const normalized = model.id.toLowerCase();
-	return normalized.includes("3-pro") || normalized.includes("3.1-pro");
+	return /gemini-3(?:\.\d+)?-pro/.test(model.id.toLowerCase());
 }
 
 function isGemini3FlashModel(model: Model<"google-generative-ai">): boolean {
-	const normalized = model.id.toLowerCase();
-	return normalized.includes("3-flash") || normalized.includes("3.1-flash");
+	return /gemini-3(?:\.\d+)?-flash/.test(model.id.toLowerCase());
 }
 
 function getGemini3ThinkingLevel(

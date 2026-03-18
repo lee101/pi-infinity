@@ -84,11 +84,16 @@ export const streamGoogleVertex: StreamFunction<"google-vertex", GoogleVertexOpt
 		};
 
 		try {
-			const project = resolveProject(options);
-			const location = resolveLocation(options);
-			const client = createClient(model, project, location, options?.headers);
-			const params = buildParams(model, context, options);
-			options?.onPayload?.(params);
+			const apiKey = resolveApiKey(options);
+			// Create the client using either a Vertex API key, if provided, or ADC with project and location
+			const client = apiKey
+				? createClientWithApiKey(model, apiKey, options?.headers)
+				: createClient(model, resolveProject(options), resolveLocation(options), options?.headers);
+			let params = buildParams(model, context, options);
+			const nextParams = await options?.onPayload?.(params, model);
+			if (nextParams !== undefined) {
+				params = nextParams as GenerateContentParameters;
+			}
 			const googleStream = await client.models.generateContentStream(params);
 
 			stream.push({ type: "start", partial: output });
@@ -96,6 +101,9 @@ export const streamGoogleVertex: StreamFunction<"google-vertex", GoogleVertexOpt
 			const blocks = output.content;
 			const blockIndex = () => blocks.length - 1;
 			for await (const chunk of googleStream) {
+				// Vertex uses the same @google/genai GenerateContentResponse type as Gemini.
+				// responseId is documented there as an output-only identifier for each response.
+				output.responseId ||= chunk.responseId;
 				const candidate = chunk.candidates?.[0];
 				if (candidate?.content?.parts) {
 					for (const part of candidate.content.parts) {
@@ -338,6 +346,31 @@ function createClient(
 	});
 }
 
+function createClientWithApiKey(
+	model: Model<"google-vertex">,
+	apiKey: string,
+	optionsHeaders?: Record<string, string>,
+): GoogleGenAI {
+	const httpOptions: { headers?: Record<string, string> } = {};
+
+	if (model.headers || optionsHeaders) {
+		httpOptions.headers = { ...model.headers, ...optionsHeaders };
+	}
+
+	const hasHttpOptions = Object.values(httpOptions).some(Boolean);
+
+	return new GoogleGenAI({
+		vertexai: true,
+		apiKey,
+		apiVersion: API_VERSION,
+		httpOptions: hasHttpOptions ? httpOptions : undefined,
+	});
+}
+
+function resolveApiKey(options?: GoogleVertexOptions): string | undefined {
+	return options?.apiKey || process.env.GOOGLE_CLOUD_API_KEY;
+}
+
 function resolveProject(options?: GoogleVertexOptions): string {
 	const project = options?.project || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
 	if (!project) {
@@ -416,13 +449,11 @@ function buildParams(
 type ClampedThinkingLevel = Exclude<PiThinkingLevel, "xhigh">;
 
 function isGemini3ProModel(model: Model<"google-generative-ai">): boolean {
-	const normalized = model.id.toLowerCase();
-	return normalized.includes("3-pro") || normalized.includes("3.1-pro");
+	return /gemini-3(?:\.\d+)?-pro/.test(model.id.toLowerCase());
 }
 
 function isGemini3FlashModel(model: Model<"google-generative-ai">): boolean {
-	const normalized = model.id.toLowerCase();
-	return normalized.includes("3-flash") || normalized.includes("3.1-flash");
+	return /gemini-3(?:\.\d+)?-flash/.test(model.id.toLowerCase());
 }
 
 function getGemini3ThinkingLevel(
