@@ -1977,13 +1977,18 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text.startsWith("/import")) {
+				await this.handleImportCommand(text);
+				this.editor.setText("");
+				return;
+			}
 			if (text === "/share") {
 				await this.handleShareCommand();
 				this.editor.setText("");
 				return;
 			}
 			if (text === "/copy") {
-				this.handleCopyCommand();
+				await this.handleCopyCommand();
 				this.editor.setText("");
 				return;
 			}
@@ -3909,10 +3914,59 @@ export class InteractiveMode {
 		const outputPath = parts.length > 1 ? parts[1] : undefined;
 
 		try {
-			const filePath = await this.session.exportToHtml(outputPath);
-			this.showStatus(`Session exported to: ${filePath}`);
+			if (outputPath?.endsWith(".jsonl")) {
+				const filePath = this.session.exportToJsonl(outputPath);
+				this.showStatus(`Session exported to: ${filePath}`);
+			} else {
+				const filePath = await this.session.exportToHtml(outputPath);
+				this.showStatus(`Session exported to: ${filePath}`);
+			}
 		} catch (error: unknown) {
 			this.showError(`Failed to export session: ${error instanceof Error ? error.message : "Unknown error"}`);
+		}
+	}
+
+	private async handleImportCommand(text: string): Promise<void> {
+		const parts = text.split(/\s+/);
+		if (parts.length < 2 || !parts[1]) {
+			this.showError("Usage: /import <path.jsonl>");
+			return;
+		}
+		const inputPath = parts[1];
+
+		const confirmed = await this.showExtensionConfirm("Import session", `Replace current session with ${inputPath}?`);
+		if (!confirmed) {
+			this.showStatus("Import cancelled");
+			return;
+		}
+
+		try {
+			// Stop loading animation
+			if (this.loadingAnimation) {
+				this.loadingAnimation.stop();
+				this.loadingAnimation = undefined;
+			}
+			this.statusContainer.clear();
+
+			// Clear UI state
+			this.pendingMessagesContainer.clear();
+			this.compactionQueuedMessages = [];
+			this.streamingComponent = undefined;
+			this.streamingMessage = undefined;
+			this.pendingTools.clear();
+
+			const success = await this.session.importFromJsonl(inputPath);
+			if (!success) {
+				this.showWarning("Import cancelled");
+				return;
+			}
+
+			// Clear and re-render the chat
+			this.chatContainer.clear();
+			this.renderInitialMessages();
+			this.showStatus(`Session imported from: ${inputPath}`);
+		} catch (error: unknown) {
+			this.showError(`Failed to import session: ${error instanceof Error ? error.message : "Unknown error"}`);
 		}
 	}
 
@@ -4010,7 +4064,7 @@ export class InteractiveMode {
 		}
 	}
 
-	private handleCopyCommand(): void {
+	private async handleCopyCommand(): Promise<void> {
 		const text = this.session.getLastAssistantText();
 		if (!text) {
 			this.showError("No agent messages to copy yet.");
@@ -4018,7 +4072,7 @@ export class InteractiveMode {
 		}
 
 		try {
-			copyToClipboard(text);
+			await copyToClipboard(text);
 			this.showStatus("Copied last agent message to clipboard");
 		} catch (error) {
 			this.showError(error instanceof Error ? error.message : String(error));

@@ -6,6 +6,10 @@
 
 - Added `gpt-5.4-mini` model support for the `openai-codex` provider with Codex pricing metadata and unit coverage.
 
+### Fixed
+
+- Fixed `google-vertex` API key resolution to ignore placeholder auth markers like `<authenticated>` and fall back to ADC instead of sending them as literal API keys ([#2335](https://github.com/badlogic/pi-mono/issues/2335))
+
 ## [0.60.0] - 2026-03-18
 
 ### Fixed
