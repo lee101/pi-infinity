@@ -500,7 +500,6 @@ export class AgentSession {
 						attempt: this._retryAttempt,
 					});
 					this._retryAttempt = 0;
-					this._resolveRetry();
 				}
 			}
 		}
@@ -516,6 +515,7 @@ export class AgentSession {
 				if (didRetry) return; // Retry was initiated, don't proceed to compaction
 			}
 
+			this._resolveRetry();
 			await this._checkCompaction(msg);
 
 			// Queue autonomous follow-up if enabled (after compaction, so it has full context)
