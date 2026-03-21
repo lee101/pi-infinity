@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.61.1] - 2026-03-20
+
+### Changed
+
+- Changed MiniMax model metadata to add missing `MiniMax-M2.1-highspeed` entries for the `minimax` and `minimax-cn` providers and normalize MiniMax Anthropic-compatible context limits to the provider's supported model set ([#2445](https://github.com/badlogic/pi-mono/pull/2445) by [@1500256797](https://github.com/1500256797))
+
 ## [0.61.0] - 2026-03-20
 
 ### Added
