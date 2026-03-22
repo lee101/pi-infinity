@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Changed `ToolDefinition.renderCall` and `renderResult` semantics. Fallback rendering now happens only when a renderer is not defined for that slot. If `renderCall` or `renderResult` is defined, it must return a `Component`.
+
+### Changed
+
+- Built-in tools now work like custom tools in extensions. To get built-in tool definitions, import `readToolDefinition` / `createReadToolDefinition()` and the equivalent `bash`, `edit`, `write`, `grep`, `find`, and `ls` exports from `@mariozechner/pi-coding-agent`.
+- Cleaned up `buildSystemPrompt()` so built-in tool snippets and tool-local guidelines come from built-in `ToolDefinition` metadata, while cross-tool and global prompt rules stay in system prompt construction.
+
 ## [0.61.1] - 2026-03-20
 
 ### New Features
