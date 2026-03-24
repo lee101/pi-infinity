@@ -204,6 +204,7 @@ export interface SessionStats {
 		total: number;
 	};
 	cost: number;
+	contextUsage?: ContextUsage;
 }
 
 interface ToolDefinitionEntry {
@@ -3090,6 +3091,7 @@ export class AgentSession {
 				total: totalInput + totalOutput + totalCacheRead + totalCacheWrite,
 			},
 			cost: totalCost,
+			contextUsage: this.getContextUsage(),
 		};
 	}
 
