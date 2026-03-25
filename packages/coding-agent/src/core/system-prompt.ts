@@ -5,22 +5,15 @@
 import { getDocsPath, getExamplesPath, getReadmePath } from "../config.js";
 import { formatSkillsForPrompt, type Skill } from "./skills.js";
 
-/** Tool descriptions for system prompt */
-const toolDescriptions: Record<string, string> = {
-	read: "Read file contents",
-	bash: "Execute bash commands (ls, grep, find, etc.)",
-	edit: "Make surgical edits to files (find exact text and replace)",
-	write: "Create or overwrite files",
-	grep: "Search file contents for patterns (respects .gitignore)",
-	find: "Find files by glob pattern (respects .gitignore)",
-	ls: "List directory contents",
-};
-
 export interface BuildSystemPromptOptions {
 	/** Custom system prompt (replaces default). */
 	customPrompt?: string;
 	/** Tools to include in prompt. Default: [read, bash, edit, write] */
 	selectedTools?: string[];
+	/** Optional one-line tool snippets keyed by tool name. */
+	toolSnippets?: Record<string, string>;
+	/** Additional guideline bullets appended to the default system prompt guidelines. */
+	promptGuidelines?: string[];
 	/** Text to append to system prompt. */
 	appendSystemPrompt?: string;
 	/** Working directory. Default: process.cwd() */
@@ -36,24 +29,17 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	const {
 		customPrompt,
 		selectedTools,
+		toolSnippets,
+		promptGuidelines,
 		appendSystemPrompt,
 		cwd,
 		contextFiles: providedContextFiles,
 		skills: providedSkills,
 	} = options;
 	const resolvedCwd = cwd ?? process.cwd();
+	const promptCwd = resolvedCwd.replace(/\\/g, "/");
 
-	const now = new Date();
-	const dateTime = now.toLocaleString("en-US", {
-		weekday: "long",
-		year: "numeric",
-		month: "long",
-		day: "numeric",
-		hour: "2-digit",
-		minute: "2-digit",
-		second: "2-digit",
-		timeZoneName: "short",
-	});
+	const date = new Date().toISOString().slice(0, 10);
 
 	const appendSection = appendSystemPrompt ? `\n\n${appendSystemPrompt}` : "";
 
@@ -82,9 +68,9 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 			prompt += formatSkillsForPrompt(skills);
 		}
 
-		// Add date/time and working directory last
-		prompt += `\nCurrent date and time: ${dateTime}`;
-		prompt += `\nCurrent working directory: ${resolvedCwd}`;
+		// Add date and working directory last
+		prompt += `\nCurrent date: ${date}`;
+		prompt += `\nCurrent working directory: ${promptCwd}`;
 
 		return prompt;
 	}
@@ -94,16 +80,25 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	const docsPath = getDocsPath();
 	const examplesPath = getExamplesPath();
 
-	// Build tools list based on selected tools (only built-in tools with known descriptions)
-	const tools = (selectedTools || ["read", "bash", "edit", "write"]).filter((t) => t in toolDescriptions);
-	const toolsList = tools.length > 0 ? tools.map((t) => `- ${t}: ${toolDescriptions[t]}`).join("\n") : "(none)";
+	// Build tools list based on selected tools.
+	// A tool appears in Available tools only when the caller provides a one-line snippet.
+	const tools = selectedTools || ["read", "bash", "edit", "write"];
+	const visibleTools = tools.filter((name) => !!toolSnippets?.[name]);
+	const toolsList =
+		visibleTools.length > 0 ? visibleTools.map((name) => `- ${name}: ${toolSnippets![name]}`).join("\n") : "(none)";
 
 	// Build guidelines based on which tools are actually available
 	const guidelinesList: string[] = [];
+	const guidelinesSet = new Set<string>();
+	const addGuideline = (guideline: string): void => {
+		if (guidelinesSet.has(guideline)) {
+			return;
+		}
+		guidelinesSet.add(guideline);
+		guidelinesList.push(guideline);
+	};
 
 	const hasBash = tools.includes("bash");
-	const hasEdit = tools.includes("edit");
-	const hasWrite = tools.includes("write");
 	const hasGrep = tools.includes("grep");
 	const hasFind = tools.includes("find");
 	const hasLs = tools.includes("ls");
@@ -111,36 +106,21 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 
 	// File exploration guidelines
 	if (hasBash && !hasGrep && !hasFind && !hasLs) {
-		guidelinesList.push("Use bash for file operations like ls, rg, find");
+		addGuideline("Use bash for file operations like ls, rg, find");
 	} else if (hasBash && (hasGrep || hasFind || hasLs)) {
-		guidelinesList.push("Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)");
+		addGuideline("Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)");
 	}
 
-	// Read before edit guideline
-	if (hasRead && hasEdit) {
-		guidelinesList.push("Use read to examine files before editing. You must use this tool instead of cat or sed.");
-	}
-
-	// Edit guideline
-	if (hasEdit) {
-		guidelinesList.push("Use edit for precise changes (old text must match exactly)");
-	}
-
-	// Write guideline
-	if (hasWrite) {
-		guidelinesList.push("Use write only for new files or complete rewrites");
-	}
-
-	// Output guideline (only when actually writing or executing)
-	if (hasEdit || hasWrite) {
-		guidelinesList.push(
-			"When summarizing your actions, output plain text directly - do NOT use cat or bash to display what you did",
-		);
+	for (const guideline of promptGuidelines ?? []) {
+		const normalized = guideline.trim();
+		if (normalized.length > 0) {
+			addGuideline(normalized);
+		}
 	}
 
 	// Always include these
-	guidelinesList.push("Be concise in your responses");
-	guidelinesList.push("Show file paths clearly when working with files");
+	addGuideline("Be concise in your responses");
+	addGuideline("Show file paths clearly when working with files");
 
 	const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
 
@@ -180,9 +160,9 @@ Pi documentation (read only when the user asks about pi itself, its SDK, extensi
 		prompt += formatSkillsForPrompt(skills);
 	}
 
-	// Add date/time and working directory last
-	prompt += `\nCurrent date and time: ${dateTime}`;
-	prompt += `\nCurrent working directory: ${resolvedCwd}`;
+	// Add date and working directory last
+	prompt += `\nCurrent date: ${date}`;
+	prompt += `\nCurrent working directory: ${promptCwd}`;
 
 	return prompt;
 }

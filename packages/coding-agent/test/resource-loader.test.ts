@@ -1,10 +1,15 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { AuthStorage } from "../src/core/auth-storage.js";
+import { ExtensionRunner } from "../src/core/extensions/runner.js";
+import { ModelRegistry } from "../src/core/model-registry.js";
 import { DefaultResourceLoader } from "../src/core/resource-loader.js";
+import { SessionManager } from "../src/core/session-manager.js";
 import { SettingsManager } from "../src/core/settings-manager.js";
 import type { Skill } from "../src/core/skills.js";
+import { createSyntheticSourceInfo } from "../src/core/source-info.js";
 
 describe("DefaultResourceLoader", () => {
 	let tempDir: string;
@@ -91,6 +96,132 @@ Prompt content.`,
 			expect(prompts.some((p) => p.name === "test-prompt")).toBe(true);
 		});
 
+		it("should prefer project resources over user on name collisions", async () => {
+			const userPromptsDir = join(agentDir, "prompts");
+			const projectPromptsDir = join(cwd, ".pinf", "prompts");
+			mkdirSync(userPromptsDir, { recursive: true });
+			mkdirSync(projectPromptsDir, { recursive: true });
+			const userPromptPath = join(userPromptsDir, "commit.md");
+			const projectPromptPath = join(projectPromptsDir, "commit.md");
+			writeFileSync(userPromptPath, "User prompt");
+			writeFileSync(projectPromptPath, "Project prompt");
+
+			const userSkillDir = join(agentDir, "skills", "collision-skill");
+			const projectSkillDir = join(cwd, ".pinf", "skills", "collision-skill");
+			mkdirSync(userSkillDir, { recursive: true });
+			mkdirSync(projectSkillDir, { recursive: true });
+			const userSkillPath = join(userSkillDir, "SKILL.md");
+			const projectSkillPath = join(projectSkillDir, "SKILL.md");
+			writeFileSync(
+				userSkillPath,
+				`---
+name: collision-skill
+description: user
+---
+User skill`,
+			);
+			writeFileSync(
+				projectSkillPath,
+				`---
+name: collision-skill
+description: project
+---
+Project skill`,
+			);
+
+			const baseTheme = JSON.parse(
+				readFileSync(join(process.cwd(), "src", "modes", "interactive", "theme", "dark.json"), "utf-8"),
+			) as { name: string; vars?: Record<string, string> };
+			baseTheme.name = "collision-theme";
+			const userThemePath = join(agentDir, "themes", "collision.json");
+			const projectThemePath = join(cwd, ".pinf", "themes", "collision.json");
+			mkdirSync(join(agentDir, "themes"), { recursive: true });
+			mkdirSync(join(cwd, ".pinf", "themes"), { recursive: true });
+			writeFileSync(userThemePath, JSON.stringify(baseTheme, null, 2));
+			if (baseTheme.vars) {
+				baseTheme.vars.accent = "#ff00ff";
+			}
+			writeFileSync(projectThemePath, JSON.stringify(baseTheme, null, 2));
+
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+
+			const prompt = loader.getPrompts().prompts.find((p) => p.name === "commit");
+			expect(prompt?.filePath).toBe(projectPromptPath);
+
+			const skill = loader.getSkills().skills.find((s) => s.name === "collision-skill");
+			expect(skill?.filePath).toBe(projectSkillPath);
+
+			const theme = loader.getThemes().themes.find((t) => t.name === "collision-theme");
+			expect(theme?.sourcePath).toBe(projectThemePath);
+		});
+
+		it("should keep both extensions loaded when command names collide", async () => {
+			const userExtDir = join(agentDir, "extensions");
+			const projectExtDir = join(cwd, ".pinf", "extensions");
+			mkdirSync(userExtDir, { recursive: true });
+			mkdirSync(projectExtDir, { recursive: true });
+
+			writeFileSync(
+				join(projectExtDir, "project.ts"),
+				`export default function(pi) {
+	pi.registerCommand("deploy", {
+		description: "project deploy",
+		handler: async () => {},
+	});
+	pi.registerCommand("project-only", {
+		description: "project only",
+		handler: async () => {},
+	});
+}`,
+			);
+
+			writeFileSync(
+				join(userExtDir, "user.ts"),
+				`export default function(pi) {
+	pi.registerCommand("deploy", {
+		description: "user deploy",
+		handler: async () => {},
+	});
+	pi.registerCommand("user-only", {
+		description: "user only",
+		handler: async () => {},
+	});
+}`,
+			);
+
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+
+			const extensionsResult = loader.getExtensions();
+			expect(extensionsResult.extensions).toHaveLength(2);
+			expect(extensionsResult.errors.some((e) => e.error.includes('Command "/deploy" conflicts'))).toBe(false);
+
+			const sessionManager = SessionManager.inMemory();
+			const authStorage = AuthStorage.create(join(tempDir, "auth.json"));
+			const modelRegistry = new ModelRegistry(authStorage);
+			const runner = new ExtensionRunner(
+				extensionsResult.extensions,
+				extensionsResult.runtime,
+				cwd,
+				sessionManager,
+				modelRegistry,
+			);
+
+			expect(runner.getCommand("deploy:1")?.description).toBe("project deploy");
+			expect(runner.getCommand("deploy:2")?.description).toBe("user deploy");
+			expect(runner.getCommand("project-only")?.description).toBe("project only");
+			expect(runner.getCommand("user-only")?.description).toBe("user only");
+
+			const commands = runner.getRegisteredCommands();
+			expect(commands.map((command) => command.invocationName)).toEqual([
+				"deploy:1",
+				"project-only",
+				"deploy:2",
+				"user-only",
+			]);
+		});
+
 		it("should honor overrides for auto-discovered resources", async () => {
 			const settingsManager = SettingsManager.inMemory();
 			settingsManager.setExtensionPaths(["-extensions/disabled.ts"]);
@@ -146,7 +277,7 @@ Content`,
 		});
 
 		it("should discover SYSTEM.md from cwd/.pi", async () => {
-			const piDir = join(cwd, ".pi");
+			const piDir = join(cwd, ".pinf");
 			mkdirSync(piDir, { recursive: true });
 			writeFileSync(join(piDir, "SYSTEM.md"), "You are a helpful assistant.");
 
@@ -157,7 +288,7 @@ Content`,
 		});
 
 		it("should discover APPEND_SYSTEM.md", async () => {
-			const piDir = join(cwd, ".pi");
+			const piDir = join(cwd, ".pinf");
 			mkdirSync(piDir, { recursive: true });
 			writeFileSync(join(piDir, "APPEND_SYSTEM.md"), "Additional instructions.");
 
@@ -222,14 +353,16 @@ Extra prompt content`,
 			});
 
 			const { skills } = loader.getSkills();
-			expect(skills.some((skill) => skill.name === "extra-skill")).toBe(true);
+			const loadedSkill = skills.find((skill) => skill.name === "extra-skill");
+			expect(loadedSkill).toBeDefined();
+			expect(loadedSkill?.sourceInfo?.source).toBe("extension:extra");
+			expect(loadedSkill?.sourceInfo?.path).toBe(skillPath);
 
 			const { prompts } = loader.getPrompts();
-			expect(prompts.some((prompt) => prompt.name === "extra")).toBe(true);
-
-			const metadata = loader.getPathMetadata();
-			expect(metadata.get(skillPath)?.source).toBe("extension:extra");
-			expect(metadata.get(promptPath)?.source).toBe("extension:extra");
+			const loadedPrompt = prompts.find((prompt) => prompt.name === "extra");
+			expect(loadedPrompt).toBeDefined();
+			expect(loadedPrompt?.sourceInfo?.source).toBe("extension:extra");
+			expect(loadedPrompt?.sourceInfo?.path).toBe(promptPath);
 		});
 	});
 
@@ -285,7 +418,7 @@ Content`,
 				description: "Injected skill",
 				filePath: "/fake/path",
 				baseDir: "/fake",
-				source: "custom",
+				sourceInfo: createSyntheticSourceInfo("/fake/path", { source: "custom" }),
 				disableModelInvocation: false,
 			};
 			const loader = new DefaultResourceLoader({
@@ -358,6 +491,75 @@ export default function(pi: ExtensionAPI) {
 
 			const { errors } = loader.getExtensions();
 			expect(errors.some((e) => e.error.includes("duplicate-tool") && e.error.includes("conflicts"))).toBe(true);
+		});
+
+		it("should prefer explicit CLI extensions over discovered extensions when commands and tools conflict", async () => {
+			const globalExtDir = join(agentDir, "extensions");
+			mkdirSync(globalExtDir, { recursive: true });
+			const explicitExtPath = join(tempDir, "explicit-extension.ts");
+
+			writeFileSync(
+				join(globalExtDir, "global.ts"),
+				`
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { Type } from "@sinclair/typebox";
+export default function(pi: ExtensionAPI) {
+  pi.registerTool({
+    name: "duplicate-tool",
+    description: "global tool",
+    parameters: Type.Object({}),
+    execute: async () => ({ result: "global" }),
+  });
+  pi.registerCommand("deploy", {
+    description: "global command",
+    handler: async () => {},
+  });
+}`,
+			);
+
+			writeFileSync(
+				explicitExtPath,
+				`
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { Type } from "@sinclair/typebox";
+export default function(pi: ExtensionAPI) {
+  pi.registerTool({
+    name: "duplicate-tool",
+    description: "explicit tool",
+    parameters: Type.Object({}),
+    execute: async () => ({ result: "explicit" }),
+  });
+  pi.registerCommand("deploy", {
+    description: "explicit command",
+    handler: async () => {},
+  });
+}`,
+			);
+
+			const loader = new DefaultResourceLoader({
+				cwd,
+				agentDir,
+				additionalExtensionPaths: [explicitExtPath],
+			});
+			await loader.reload();
+
+			const extensionsResult = loader.getExtensions();
+			expect(extensionsResult.extensions[0]?.path).toBe(explicitExtPath);
+
+			const sessionManager = SessionManager.inMemory();
+			const authStorage = AuthStorage.create(join(tempDir, "auth-explicit.json"));
+			const modelRegistry = new ModelRegistry(authStorage);
+			const runner = new ExtensionRunner(
+				extensionsResult.extensions,
+				extensionsResult.runtime,
+				cwd,
+				sessionManager,
+				modelRegistry,
+			);
+
+			expect(runner.getCommand("deploy:1")?.description).toBe("explicit command");
+			expect(runner.getCommand("deploy:2")?.description).toBe("global command");
+			expect(runner.getToolDefinition("duplicate-tool")?.description).toBe("explicit tool");
 		});
 	});
 });

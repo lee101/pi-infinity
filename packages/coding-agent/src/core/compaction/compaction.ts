@@ -317,7 +317,10 @@ function findValidCutPoints(entries: SessionEntry[], startIndex: number, endInde
 			case "custom":
 			case "custom_message":
 			case "label":
+			case "session_info":
+				break;
 		}
+
 		// branch_summary and custom_message are user-role messages, valid cut points
 		if (entry.type === "branch_summary" || entry.type === "custom_message") {
 			cutPoints.push(i);
@@ -554,10 +557,14 @@ export async function generateSummary(
 		},
 	];
 
+	const completionOptions = model.reasoning
+		? { maxTokens, signal, apiKey, reasoning: "high" as const }
+		: { maxTokens, signal, apiKey };
+
 	const response = await completeSimple(
 		model,
 		{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
-		{ maxTokens, signal, apiKey, reasoning: "high" },
+		completionOptions,
 	);
 
 	if (response.stopReason === "error") {

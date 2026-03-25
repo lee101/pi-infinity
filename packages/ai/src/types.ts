@@ -4,6 +4,7 @@ export type { AssistantMessageEventStream } from "./utils/event-stream.js";
 
 export type KnownApi =
 	| "openai-completions"
+	| "mistral-conversations"
 	| "openai-responses"
 	| "azure-openai-responses"
 	| "openai-codex-responses"
@@ -37,6 +38,7 @@ export type KnownProvider =
 	| "minimax-cn"
 	| "huggingface"
 	| "opencode"
+	| "opencode-go"
 	| "kimi-coding";
 export type Provider = KnownProvider | string;
 
@@ -77,9 +79,10 @@ export interface StreamOptions {
 	 */
 	sessionId?: string;
 	/**
-	 * Optional callback for inspecting provider payloads before sending.
+	 * Optional callback for inspecting or replacing provider payloads before sending.
+	 * Return undefined to keep the payload unchanged.
 	 */
-	onPayload?: (payload: unknown) => void;
+	onPayload?: (payload: unknown, model: Model<Api>) => unknown | undefined | Promise<unknown | undefined>;
 	/**
 	 * Optional custom HTTP headers to include in API requests.
 	 * Merged with provider defaults; can override default headers.
@@ -111,23 +114,40 @@ export interface SimpleStreamOptions extends StreamOptions {
 	thinkingBudgets?: ThinkingBudgets;
 }
 
-// Generic StreamFunction with typed options
+// Generic StreamFunction with typed options.
+//
+// Contract:
+// - Must return an AssistantMessageEventStream.
+// - Once invoked, request/model/runtime failures should be encoded in the
+//   returned stream, not thrown.
+// - Error termination must produce an AssistantMessage with stopReason
+//   "error" or "aborted" and errorMessage, emitted via the stream protocol.
 export type StreamFunction<TApi extends Api = Api, TOptions extends StreamOptions = StreamOptions> = (
 	model: Model<TApi>,
 	context: Context,
 	options?: TOptions,
 ) => AssistantMessageEventStream;
 
+export interface TextSignatureV1 {
+	v: 1;
+	id: string;
+	phase?: "commentary" | "final_answer";
+}
+
 export interface TextContent {
 	type: "text";
 	text: string;
-	textSignature?: string; // e.g., for OpenAI responses, the message ID
+	textSignature?: string; // e.g., for OpenAI responses, message metadata (legacy id string or TextSignatureV1 JSON)
 }
 
 export interface ThinkingContent {
 	type: "thinking";
 	thinking: string;
 	thinkingSignature?: string; // e.g., for OpenAI responses, the reasoning item ID
+	/** When true, the thinking content was redacted by safety filters. The opaque
+	 *  encrypted payload is stored in `thinkingSignature` so it can be passed back
+	 *  to the API for multi-turn continuity. */
+	redacted?: boolean;
 }
 
 export interface ImageContent {
@@ -173,6 +193,7 @@ export interface AssistantMessage {
 	api: Api;
 	provider: Provider;
 	model: string;
+	responseId?: string; // Provider-specific response/message identifier when the upstream API exposes one
 	usage: Usage;
 	stopReason: StopReason;
 	errorMessage?: string;
@@ -205,6 +226,14 @@ export interface Context {
 	tools?: Tool[];
 }
 
+/**
+ * Event protocol for AssistantMessageEventStream.
+ *
+ * Streams should emit `start` before partial updates, then terminate with either:
+ * - `done` carrying the final successful AssistantMessage, or
+ * - `error` carrying the final AssistantMessage with stopReason "error" or "aborted"
+ *   and errorMessage.
+ */
 export type AssistantMessageEvent =
 	| { type: "start"; partial: AssistantMessage }
 	| { type: "text_start"; contentIndex: number; partial: AssistantMessage }
@@ -230,6 +259,8 @@ export interface OpenAICompletionsCompat {
 	supportsDeveloperRole?: boolean;
 	/** Whether the provider supports `reasoning_effort`. Default: auto-detected from URL. */
 	supportsReasoningEffort?: boolean;
+	/** Optional mapping from pi-ai reasoning levels to provider/model-specific `reasoning_effort` values. */
+	reasoningEffortMap?: Partial<Record<ThinkingLevel, string>>;
 	/** Whether the provider supports `stream_options: { include_usage: true }` for token usage in streaming responses. Default: true. */
 	supportsUsageInStreaming?: boolean;
 	/** Which field to use for max tokens. Default: auto-detected from URL. */
@@ -240,10 +271,8 @@ export interface OpenAICompletionsCompat {
 	requiresAssistantAfterToolResult?: boolean;
 	/** Whether thinking blocks must be converted to text blocks with <thinking> delimiters. Default: auto-detected from URL. */
 	requiresThinkingAsText?: boolean;
-	/** Whether tool call IDs must be normalized to Mistral format (exactly 9 alphanumeric chars). Default: auto-detected from URL. */
-	requiresMistralToolIds?: boolean;
-	/** Format for reasoning/thinking parameter. "openai" uses reasoning_effort, "zai" uses thinking: { type: "enabled" }, "qwen" uses enable_thinking: boolean. Default: "openai". */
-	thinkingFormat?: "openai" | "zai" | "qwen";
+	/** Format for reasoning/thinking parameter. "openai" uses reasoning_effort, "openrouter" uses reasoning: { effort }, "zai" uses top-level enable_thinking: boolean, "qwen" uses top-level enable_thinking: boolean, and "qwen-chat-template" uses chat_template_kwargs.enable_thinking. Default: "openai". */
+	thinkingFormat?: "openai" | "openrouter" | "zai" | "qwen" | "qwen-chat-template";
 	/** OpenRouter-specific routing preferences. Only used when baseUrl points to OpenRouter. */
 	openRouterRouting?: OpenRouterRouting;
 	/** Vercel AI Gateway routing preferences. Only used when baseUrl points to Vercel AI Gateway. */

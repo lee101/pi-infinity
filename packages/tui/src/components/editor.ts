@@ -1,13 +1,81 @@
 import type { AutocompleteProvider, CombinedAutocompleteProvider } from "../autocomplete.js";
-import { getEditorKeybindings } from "../keybindings.js";
-import { matchesKey } from "../keys.js";
+import { getKeybindings } from "../keybindings.js";
+import { decodeKittyPrintable, matchesKey } from "../keys.js";
 import { KillRing } from "../kill-ring.js";
 import { type Component, CURSOR_MARKER, type Focusable, type TUI } from "../tui.js";
 import { UndoStack } from "../undo-stack.js";
-import { getSegmenter, isPunctuationChar, isWhitespaceChar, visibleWidth } from "../utils.js";
-import { SelectList, type SelectListTheme } from "./select-list.js";
+import { getSegmenter, isPunctuationChar, isWhitespaceChar, truncateToWidth, visibleWidth } from "../utils.js";
+import { SelectList, type SelectListLayoutOptions, type SelectListTheme } from "./select-list.js";
 
-const segmenter = getSegmenter();
+const baseSegmenter = getSegmenter();
+
+/** Regex matching paste markers like `[paste #1 +123 lines]` or `[paste #2 1234 chars]`. */
+const PASTE_MARKER_REGEX = /\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]/g;
+
+/** Non-global version for single-segment testing. */
+const PASTE_MARKER_SINGLE = /^\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]$/;
+
+/** Check if a segment is a paste marker (i.e. was merged by segmentWithMarkers). */
+function isPasteMarker(segment: string): boolean {
+	return segment.length >= 10 && PASTE_MARKER_SINGLE.test(segment);
+}
+
+/**
+ * A segmenter that wraps Intl.Segmenter and merges graphemes that fall
+ * within paste markers into single atomic segments.  This makes cursor
+ * movement, deletion, word-wrap, etc. treat paste markers as single units.
+ *
+ * Only markers whose numeric ID exists in `validIds` are merged.
+ */
+function segmentWithMarkers(text: string, validIds: Set<number>): Iterable<Intl.SegmentData> {
+	// Fast path: no paste markers in the text or no valid IDs.
+	if (validIds.size === 0 || !text.includes("[paste #")) {
+		return baseSegmenter.segment(text);
+	}
+
+	// Find all marker spans with valid IDs.
+	const markers: Array<{ start: number; end: number }> = [];
+	for (const m of text.matchAll(PASTE_MARKER_REGEX)) {
+		const id = Number.parseInt(m[1]!, 10);
+		if (!validIds.has(id)) continue;
+		markers.push({ start: m.index, end: m.index + m[0].length });
+	}
+	if (markers.length === 0) {
+		return baseSegmenter.segment(text);
+	}
+
+	// Build merged segment list.
+	const baseSegments = baseSegmenter.segment(text);
+	const result: Intl.SegmentData[] = [];
+	let markerIdx = 0;
+
+	for (const seg of baseSegments) {
+		// Skip past markers that are entirely before this segment.
+		while (markerIdx < markers.length && markers[markerIdx]!.end <= seg.index) {
+			markerIdx++;
+		}
+
+		const marker = markerIdx < markers.length ? markers[markerIdx]! : null;
+
+		if (marker && seg.index >= marker.start && seg.index < marker.end) {
+			// This segment falls inside a marker.
+			// If this is the first segment of the marker, emit a merged segment.
+			if (seg.index === marker.start) {
+				const markerText = text.slice(marker.start, marker.end);
+				result.push({
+					segment: markerText,
+					index: marker.start,
+					input: text,
+				});
+			}
+			// Otherwise skip (already merged into the first segment).
+		} else {
+			result.push(seg);
+		}
+	}
+
+	return result;
+}
 
 /**
  * Represents a chunk of text for word-wrap layout.
@@ -26,9 +94,11 @@ export interface TextChunk {
  *
  * @param line - The text line to wrap
  * @param maxWidth - Maximum visible width per chunk
+ * @param preSegmented - Optional pre-segmented graphemes (e.g. with paste-marker awareness).
+ *                       When omitted the default Intl.Segmenter is used.
  * @returns Array of chunks with text and position information
  */
-export function wordWrapLine(line: string, maxWidth: number): TextChunk[] {
+export function wordWrapLine(line: string, maxWidth: number, preSegmented?: Intl.SegmentData[]): TextChunk[] {
 	if (!line || maxWidth <= 0) {
 		return [{ text: "", startIndex: 0, endIndex: 0 }];
 	}
@@ -39,7 +109,7 @@ export function wordWrapLine(line: string, maxWidth: number): TextChunk[] {
 	}
 
 	const chunks: TextChunk[] = [];
-	const segments = [...segmenter.segment(line)];
+	const segments = preSegmented ?? [...baseSegmenter.segment(line)];
 
 	let currentWidth = 0;
 	let chunkStart = 0;
@@ -54,22 +124,45 @@ export function wordWrapLine(line: string, maxWidth: number): TextChunk[] {
 		const grapheme = seg.segment;
 		const gWidth = visibleWidth(grapheme);
 		const charIndex = seg.index;
-		const isWs = isWhitespaceChar(grapheme);
+		const isWs = !isPasteMarker(grapheme) && isWhitespaceChar(grapheme);
 
 		// Overflow check before advancing.
 		if (currentWidth + gWidth > maxWidth) {
-			if (wrapOppIndex >= 0) {
-				// Backtrack to last wrap opportunity.
+			if (wrapOppIndex >= 0 && currentWidth - wrapOppWidth + gWidth <= maxWidth) {
+				// Backtrack to last wrap opportunity (the remaining content
+				// plus the current grapheme still fits within maxWidth).
 				chunks.push({ text: line.slice(chunkStart, wrapOppIndex), startIndex: chunkStart, endIndex: wrapOppIndex });
 				chunkStart = wrapOppIndex;
 				currentWidth -= wrapOppWidth;
 			} else if (chunkStart < charIndex) {
-				// No wrap opportunity: force-break at current position.
+				// No viable wrap opportunity: force-break at current position.
+				// This also handles the case where backtracking to a word
+				// boundary wouldn't help because the remaining content plus
+				// the current grapheme (e.g. a wide character) still exceeds
+				// maxWidth.
 				chunks.push({ text: line.slice(chunkStart, charIndex), startIndex: chunkStart, endIndex: charIndex });
 				chunkStart = charIndex;
 				currentWidth = 0;
 			}
 			wrapOppIndex = -1;
+		}
+
+		if (gWidth > maxWidth) {
+			// Single atomic segment wider than maxWidth (e.g. paste marker
+			// in a narrow terminal). Re-wrap it at grapheme granularity.
+
+			// The segment remains logically atomic for cursor
+			// movement / editing — the split is purely visual for word-wrap layout.
+			const subChunks = wordWrapLine(grapheme, maxWidth);
+			for (let j = 0; j < subChunks.length - 1; j++) {
+				const sc = subChunks[j]!;
+				chunks.push({ text: sc.text, startIndex: charIndex + sc.startIndex, endIndex: charIndex + sc.endIndex });
+			}
+			const last = subChunks[subChunks.length - 1]!;
+			chunkStart = charIndex + last.startIndex;
+			currentWidth = visibleWidth(last.text);
+			wrapOppIndex = -1;
+			continue;
 		}
 
 		// Advance.
@@ -79,7 +172,7 @@ export function wordWrapLine(line: string, maxWidth: number): TextChunk[] {
 		// Multiple spaces join (no break between them); the break point is
 		// after the last space before the next word.
 		const next = segments[i + 1];
-		if (isWs && next && !isWhitespaceChar(next.segment)) {
+		if (isWs && next && (isPasteMarker(next.segment) || !isWhitespaceChar(next.segment))) {
 			wrapOppIndex = next.index;
 			wrapOppWidth = currentWidth;
 		}
@@ -92,43 +185,6 @@ export function wordWrapLine(line: string, maxWidth: number): TextChunk[] {
 }
 
 // Kitty CSI-u sequences for printable keys, including optional shifted/base codepoints.
-const KITTY_CSI_U_REGEX = /^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u$/;
-const KITTY_MOD_SHIFT = 1;
-const KITTY_MOD_ALT = 2;
-const KITTY_MOD_CTRL = 4;
-
-// Decode a printable CSI-u sequence, preferring the shifted key when present.
-function decodeKittyPrintable(data: string): string | undefined {
-	const match = data.match(KITTY_CSI_U_REGEX);
-	if (!match) return undefined;
-
-	// CSI-u groups: <codepoint>[:<shifted>[:<base>]];<mod>u
-	const codepoint = Number.parseInt(match[1] ?? "", 10);
-	if (!Number.isFinite(codepoint)) return undefined;
-
-	const shiftedKey = match[2] && match[2].length > 0 ? Number.parseInt(match[2], 10) : undefined;
-	const modValue = match[4] ? Number.parseInt(match[4], 10) : 1;
-	// Modifiers are 1-indexed in CSI-u; normalize to our bitmask.
-	const modifier = Number.isFinite(modValue) ? modValue - 1 : 0;
-
-	// Ignore CSI-u sequences used for Alt/Ctrl shortcuts.
-	if (modifier & (KITTY_MOD_ALT | KITTY_MOD_CTRL)) return undefined;
-
-	// Prefer the shifted keycode when Shift is held.
-	let effectiveCodepoint = codepoint;
-	if (modifier & KITTY_MOD_SHIFT && typeof shiftedKey === "number") {
-		effectiveCodepoint = shiftedKey;
-	}
-	// Drop control characters or invalid codepoints.
-	if (!Number.isFinite(effectiveCodepoint) || effectiveCodepoint < 32) return undefined;
-
-	try {
-		return String.fromCodePoint(effectiveCodepoint);
-	} catch {
-		return undefined;
-	}
-}
-
 interface EditorState {
 	lines: string[];
 	cursorLine: number;
@@ -150,6 +206,11 @@ export interface EditorOptions {
 	paddingX?: number;
 	autocompleteMaxVisible?: number;
 }
+
+const SLASH_COMMAND_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
+	minPrimaryColumnWidth: 12,
+	maxPrimaryColumnWidth: 32,
+};
 
 export class Editor implements Component, Focusable {
 	private state: EditorState = {
@@ -218,6 +279,16 @@ export class Editor implements Component, Focusable {
 		this.paddingX = Number.isFinite(paddingX) ? Math.max(0, Math.floor(paddingX)) : 0;
 		const maxVisible = options.autocompleteMaxVisible ?? 5;
 		this.autocompleteMaxVisible = Number.isFinite(maxVisible) ? Math.max(3, Math.min(20, Math.floor(maxVisible))) : 5;
+	}
+
+	/** Set of currently valid paste IDs, for marker-aware segmentation. */
+	private validPasteIds(): Set<number> {
+		return new Set(this.pastes.keys());
+	}
+
+	/** Segment text with paste-marker awareness, only merging markers with valid IDs. */
+	private segment(text: string): Iterable<Intl.SegmentData> {
+		return segmentWithMarkers(text, this.validPasteIds());
 	}
 
 	getPaddingX(): number {
@@ -304,7 +375,7 @@ export class Editor implements Component, Focusable {
 
 	/** Internal setText that doesn't reset history state - used by navigateHistory */
 	private setTextInternal(text: string): void {
-		const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+		const lines = text.split("\n");
 		this.state.lines = lines.length === 0 ? [""] : lines;
 		this.state.cursorLine = this.state.lines.length - 1;
 		this.setCursorCol(this.state.lines[this.state.cursorLine]?.length || 0);
@@ -367,7 +438,11 @@ export class Editor implements Component, Focusable {
 		if (this.scrollOffset > 0) {
 			const indicator = `─── ↑ ${this.scrollOffset} more `;
 			const remaining = width - visibleWidth(indicator);
-			result.push(this.borderColor(indicator + "─".repeat(Math.max(0, remaining))));
+			if (remaining >= 0) {
+				result.push(this.borderColor(indicator + "─".repeat(remaining)));
+			} else {
+				result.push(this.borderColor(truncateToWidth(indicator, width)));
+			}
 		} else {
 			result.push(horizontal.repeat(width));
 		}
@@ -392,7 +467,7 @@ export class Editor implements Component, Focusable {
 				if (after.length > 0) {
 					// Cursor is on a character (grapheme) - replace it with highlighted version
 					// Get the first grapheme from 'after'
-					const afterGraphemes = [...segmenter.segment(after)];
+					const afterGraphemes = [...this.segment(after)];
 					const firstGrapheme = afterGraphemes[0]?.segment || "";
 					const restAfter = after.slice(firstGrapheme.length);
 					const cursor = `\x1b[7m${firstGrapheme}\x1b[0m`;
@@ -442,12 +517,12 @@ export class Editor implements Component, Focusable {
 	}
 
 	handleInput(data: string): void {
-		const kb = getEditorKeybindings();
+		const kb = getKeybindings();
 
 		// Handle character jump mode (awaiting next character to jump to)
 		if (this.jumpMode !== null) {
 			// Cancel if the hotkey is pressed again
-			if (kb.matches(data, "jumpForward") || kb.matches(data, "jumpBackward")) {
+			if (kb.matches(data, "tui.editor.jumpForward") || kb.matches(data, "tui.editor.jumpBackward")) {
 				this.jumpMode = null;
 				return;
 			}
@@ -491,31 +566,33 @@ export class Editor implements Component, Focusable {
 		}
 
 		// Ctrl+C - let parent handle (exit/clear)
-		if (kb.matches(data, "copy")) {
+		if (kb.matches(data, "tui.input.copy")) {
 			return;
 		}
 
 		// Undo
-		if (kb.matches(data, "undo")) {
+		if (kb.matches(data, "tui.editor.undo")) {
 			this.undo();
 			return;
 		}
 
 		// Handle autocomplete mode
 		if (this.autocompleteState && this.autocompleteList) {
-			if (kb.matches(data, "selectCancel")) {
+			if (kb.matches(data, "tui.select.cancel")) {
 				this.cancelAutocomplete();
 				return;
 			}
 
-			if (kb.matches(data, "selectUp") || kb.matches(data, "selectDown")) {
+			if (kb.matches(data, "tui.select.up") || kb.matches(data, "tui.select.down")) {
 				this.autocompleteList.handleInput(data);
 				return;
 			}
 
-			if (kb.matches(data, "tab")) {
+			if (kb.matches(data, "tui.input.tab")) {
 				const selected = this.autocompleteList.getSelectedItem();
 				if (selected && this.autocompleteProvider) {
+					const shouldChainSlashArgumentAutocomplete = this.shouldChainSlashArgumentAutocompleteOnTabSelection();
+
 					this.pushUndoSnapshot();
 					this.lastAction = null;
 					const result = this.autocompleteProvider.applyCompletion(
@@ -530,11 +607,15 @@ export class Editor implements Component, Focusable {
 					this.setCursorCol(result.cursorCol);
 					this.cancelAutocomplete();
 					if (this.onChange) this.onChange(this.getText());
+
+					if (shouldChainSlashArgumentAutocomplete && this.isBareCompletedSlashCommandAtCursor()) {
+						this.tryTriggerAutocomplete();
+					}
 				}
 				return;
 			}
 
-			if (kb.matches(data, "selectConfirm")) {
+			if (kb.matches(data, "tui.select.confirm")) {
 				const selected = this.autocompleteList.getSelectedItem();
 				if (selected && this.autocompleteProvider) {
 					this.pushUndoSnapshot();
@@ -563,68 +644,68 @@ export class Editor implements Component, Focusable {
 		}
 
 		// Tab - trigger completion
-		if (kb.matches(data, "tab") && !this.autocompleteState) {
+		if (kb.matches(data, "tui.input.tab") && !this.autocompleteState) {
 			this.handleTabCompletion();
 			return;
 		}
 
 		// Deletion actions
-		if (kb.matches(data, "deleteToLineEnd")) {
+		if (kb.matches(data, "tui.editor.deleteToLineEnd")) {
 			this.deleteToEndOfLine();
 			return;
 		}
-		if (kb.matches(data, "deleteToLineStart")) {
+		if (kb.matches(data, "tui.editor.deleteToLineStart")) {
 			this.deleteToStartOfLine();
 			return;
 		}
-		if (kb.matches(data, "deleteWordBackward")) {
+		if (kb.matches(data, "tui.editor.deleteWordBackward")) {
 			this.deleteWordBackwards();
 			return;
 		}
-		if (kb.matches(data, "deleteWordForward")) {
+		if (kb.matches(data, "tui.editor.deleteWordForward")) {
 			this.deleteWordForward();
 			return;
 		}
-		if (kb.matches(data, "deleteCharBackward") || matchesKey(data, "shift+backspace")) {
+		if (kb.matches(data, "tui.editor.deleteCharBackward") || matchesKey(data, "shift+backspace")) {
 			this.handleBackspace();
 			return;
 		}
-		if (kb.matches(data, "deleteCharForward") || matchesKey(data, "shift+delete")) {
+		if (kb.matches(data, "tui.editor.deleteCharForward") || matchesKey(data, "shift+delete")) {
 			this.handleForwardDelete();
 			return;
 		}
 
 		// Kill ring actions
-		if (kb.matches(data, "yank")) {
+		if (kb.matches(data, "tui.editor.yank")) {
 			this.yank();
 			return;
 		}
-		if (kb.matches(data, "yankPop")) {
+		if (kb.matches(data, "tui.editor.yankPop")) {
 			this.yankPop();
 			return;
 		}
 
 		// Cursor movement actions
-		if (kb.matches(data, "cursorLineStart")) {
+		if (kb.matches(data, "tui.editor.cursorLineStart")) {
 			this.moveToLineStart();
 			return;
 		}
-		if (kb.matches(data, "cursorLineEnd")) {
+		if (kb.matches(data, "tui.editor.cursorLineEnd")) {
 			this.moveToLineEnd();
 			return;
 		}
-		if (kb.matches(data, "cursorWordLeft")) {
+		if (kb.matches(data, "tui.editor.cursorWordLeft")) {
 			this.moveWordBackwards();
 			return;
 		}
-		if (kb.matches(data, "cursorWordRight")) {
+		if (kb.matches(data, "tui.editor.cursorWordRight")) {
 			this.moveWordForwards();
 			return;
 		}
 
 		// New line
 		if (
-			kb.matches(data, "newLine") ||
+			kb.matches(data, "tui.input.newLine") ||
 			(data.charCodeAt(0) === 10 && data.length > 1) ||
 			data === "\x1b\r" ||
 			data === "\x1b[13;2~" ||
@@ -641,7 +722,7 @@ export class Editor implements Component, Focusable {
 		}
 
 		// Submit (Enter)
-		if (kb.matches(data, "submit")) {
+		if (kb.matches(data, "tui.input.submit")) {
 			if (this.disableSubmit) return;
 
 			// Workaround for terminals without Shift+Enter support:
@@ -658,7 +739,7 @@ export class Editor implements Component, Focusable {
 		}
 
 		// Arrow key navigation (with history support)
-		if (kb.matches(data, "cursorUp")) {
+		if (kb.matches(data, "tui.editor.cursorUp")) {
 			if (this.isEditorEmpty()) {
 				this.navigateHistory(-1);
 			} else if (this.historyIndex > -1 && this.isOnFirstVisualLine()) {
@@ -671,7 +752,7 @@ export class Editor implements Component, Focusable {
 			}
 			return;
 		}
-		if (kb.matches(data, "cursorDown")) {
+		if (kb.matches(data, "tui.editor.cursorDown")) {
 			if (this.historyIndex > -1 && this.isOnLastVisualLine()) {
 				this.navigateHistory(1);
 			} else if (this.isOnLastVisualLine()) {
@@ -682,31 +763,31 @@ export class Editor implements Component, Focusable {
 			}
 			return;
 		}
-		if (kb.matches(data, "cursorRight")) {
+		if (kb.matches(data, "tui.editor.cursorRight")) {
 			this.moveCursor(0, 1);
 			return;
 		}
-		if (kb.matches(data, "cursorLeft")) {
+		if (kb.matches(data, "tui.editor.cursorLeft")) {
 			this.moveCursor(0, -1);
 			return;
 		}
 
 		// Page up/down - scroll by page and move cursor
-		if (kb.matches(data, "pageUp")) {
+		if (kb.matches(data, "tui.editor.pageUp")) {
 			this.pageScroll(-1);
 			return;
 		}
-		if (kb.matches(data, "pageDown")) {
+		if (kb.matches(data, "tui.editor.pageDown")) {
 			this.pageScroll(1);
 			return;
 		}
 
 		// Character jump mode triggers
-		if (kb.matches(data, "jumpForward")) {
+		if (kb.matches(data, "tui.editor.jumpForward")) {
 			this.jumpMode = "forward";
 			return;
 		}
-		if (kb.matches(data, "jumpBackward")) {
+		if (kb.matches(data, "tui.editor.jumpBackward")) {
 			this.jumpMode = "backward";
 			return;
 		}
@@ -764,7 +845,7 @@ export class Editor implements Component, Focusable {
 				}
 			} else {
 				// Line needs wrapping - use word-aware wrapping
-				const chunks = wordWrapLine(line, contentWidth);
+				const chunks = wordWrapLine(line, contentWidth, [...this.segment(line)]);
 
 				for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
 					const chunk = chunks[chunkIndex];
@@ -821,17 +902,21 @@ export class Editor implements Component, Focusable {
 		return this.state.lines.join("\n");
 	}
 
+	private expandPasteMarkers(text: string): string {
+		let result = text;
+		for (const [pasteId, pasteContent] of this.pastes) {
+			const markerRegex = new RegExp(`\\[paste #${pasteId}( (\\+\\d+ lines|\\d+ chars))?\\]`, "g");
+			result = result.replace(markerRegex, () => pasteContent);
+		}
+		return result;
+	}
+
 	/**
 	 * Get text with paste markers expanded to their actual content.
 	 * Use this when you need the full content (e.g., for external editor).
 	 */
 	getExpandedText(): string {
-		let result = this.state.lines.join("\n");
-		for (const [pasteId, pasteContent] of this.pastes) {
-			const markerRegex = new RegExp(`\\[paste #${pasteId}( (\\+\\d+ lines|\\d+ chars))?\\]`, "g");
-			result = result.replace(markerRegex, pasteContent);
-		}
-		return result;
+		return this.expandPasteMarkers(this.state.lines.join("\n"));
 	}
 
 	getLines(): string[] {
@@ -845,11 +930,12 @@ export class Editor implements Component, Focusable {
 	setText(text: string): void {
 		this.lastAction = null;
 		this.historyIndex = -1; // Exit history browsing mode
+		const normalized = this.normalizeText(text);
 		// Push undo snapshot if content differs (makes programmatic changes undoable)
-		if (this.getText() !== text) {
+		if (this.getText() !== normalized) {
 			this.pushUndoSnapshot();
 		}
-		this.setTextInternal(text);
+		this.setTextInternal(normalized);
 	}
 
 	/**
@@ -866,6 +952,15 @@ export class Editor implements Component, Focusable {
 	}
 
 	/**
+	 * Normalize text for editor storage:
+	 * - Normalize line endings (\r\n and \r -> \n)
+	 * - Expand tabs to 4 spaces
+	 */
+	private normalizeText(text: string): string {
+		return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\t/g, "    ");
+	}
+
+	/**
 	 * Internal text insertion at cursor. Handles single and multi-line text.
 	 * Does not push undo snapshots or trigger autocomplete - caller is responsible.
 	 * Normalizes line endings and calls onChange once at the end.
@@ -873,8 +968,8 @@ export class Editor implements Component, Focusable {
 	private insertTextAtCursorInternal(text: string): void {
 		if (!text) return;
 
-		// Normalize line endings
-		const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+		// Normalize line endings and tabs
+		const normalized = this.normalizeText(text);
 		const insertedLines = normalized.split("\n");
 
 		const currentLine = this.state.lines[this.state.cursorLine] || "";
@@ -981,14 +1076,11 @@ export class Editor implements Component, Focusable {
 
 		this.pushUndoSnapshot();
 
-		// Clean the pasted text
-		const cleanText = pastedText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-
-		// Convert tabs to spaces (4 spaces per tab)
-		const tabExpandedText = cleanText.replace(/\t/g, "    ");
+		// Clean the pasted text: normalize line endings, expand tabs
+		const cleanText = this.normalizeText(pastedText);
 
 		// Filter out non-printable characters except newlines
-		let filteredText = tabExpandedText
+		let filteredText = cleanText
 			.split("")
 			.filter((char) => char === "\n" || char.charCodeAt(0) >= 32)
 			.join("");
@@ -1024,10 +1116,8 @@ export class Editor implements Component, Focusable {
 		}
 
 		if (pastedLines.length === 1) {
-			// Single line - insert character by character to trigger autocomplete
-			for (const char of filteredText) {
-				this.insertCharacter(char, true);
-			}
+			// Single line - insert atomically (do not trigger autocomplete during paste)
+			this.insertTextAtCursorInternal(filteredText);
 			return;
 		}
 
@@ -1059,10 +1149,10 @@ export class Editor implements Component, Focusable {
 		}
 	}
 
-	private shouldSubmitOnBackslashEnter(data: string, kb: ReturnType<typeof getEditorKeybindings>): boolean {
+	private shouldSubmitOnBackslashEnter(data: string, kb: ReturnType<typeof getKeybindings>): boolean {
 		if (this.disableSubmit) return false;
 		if (!matchesKey(data, "enter")) return false;
-		const submitKeys = kb.getKeys("submit");
+		const submitKeys = kb.getKeys("tui.input.submit");
 		const hasShiftEnter = submitKeys.includes("shift+enter") || submitKeys.includes("shift+return");
 		if (!hasShiftEnter) return false;
 
@@ -1071,11 +1161,7 @@ export class Editor implements Component, Focusable {
 	}
 
 	private submitValue(): void {
-		let result = this.state.lines.join("\n").trim();
-		for (const [pasteId, pasteContent] of this.pastes) {
-			const markerRegex = new RegExp(`\\[paste #${pasteId}( (\\+\\d+ lines|\\d+ chars))?\\]`, "g");
-			result = result.replace(markerRegex, pasteContent);
-		}
+		const result = this.expandPasteMarkers(this.state.lines.join("\n")).trim();
 
 		this.state = { lines: [""], cursorLine: 0, cursorCol: 0 };
 		this.pastes.clear();
@@ -1101,7 +1187,7 @@ export class Editor implements Component, Focusable {
 			const beforeCursor = line.slice(0, this.state.cursorCol);
 
 			// Find the last grapheme in the text before cursor
-			const graphemes = [...segmenter.segment(beforeCursor)];
+			const graphemes = [...this.segment(beforeCursor)];
 			const lastGrapheme = graphemes[graphemes.length - 1];
 			const graphemeLength = lastGrapheme ? lastGrapheme.segment.length : 1;
 
@@ -1192,6 +1278,20 @@ export class Editor implements Component, Focusable {
 			const targetCol = targetVL.startCol + moveToVisualCol;
 			const logicalLine = this.state.lines[targetVL.logicalLine] || "";
 			this.state.cursorCol = Math.min(targetCol, logicalLine.length);
+
+			// Snap cursor to atomic segment boundary (e.g. paste markers)
+			// so the cursor never lands in the middle of a multi-grapheme unit.
+			// Single-grapheme segments don't need snapping.
+			const segments = [...this.segment(logicalLine)];
+			for (const seg of segments) {
+				if (seg.index > this.state.cursorCol) break;
+				if (seg.segment.length <= 1) continue;
+				if (this.state.cursorCol < seg.index + seg.segment.length) {
+					// jump to the start of the segment when moving up, to the end when moving down.
+					this.state.cursorCol = currentVisualLine > targetVisualLine ? seg.index : seg.index + seg.segment.length;
+					break;
+				}
+			}
 		}
 	}
 
@@ -1426,7 +1526,7 @@ export class Editor implements Component, Focusable {
 			const afterCursor = currentLine.slice(this.state.cursorCol);
 
 			// Find the first grapheme at cursor
-			const graphemes = [...segmenter.segment(afterCursor)];
+			const graphemes = [...this.segment(afterCursor)];
 			const firstGrapheme = graphemes[0];
 			const graphemeLength = firstGrapheme ? firstGrapheme.segment.length : 1;
 
@@ -1483,7 +1583,7 @@ export class Editor implements Component, Focusable {
 				visualLines.push({ logicalLine: i, startCol: 0, length: line.length });
 			} else {
 				// Line needs wrapping - use word-aware wrapping
-				const chunks = wordWrapLine(line, width);
+				const chunks = wordWrapLine(line, width, [...this.segment(line)]);
 				for (const chunk of chunks) {
 					visualLines.push({
 						logicalLine: i,
@@ -1541,7 +1641,7 @@ export class Editor implements Component, Focusable {
 				// Moving right - move by one grapheme (handles emojis, combining characters, etc.)
 				if (this.state.cursorCol < currentLine.length) {
 					const afterCursor = currentLine.slice(this.state.cursorCol);
-					const graphemes = [...segmenter.segment(afterCursor)];
+					const graphemes = [...this.segment(afterCursor)];
 					const firstGrapheme = graphemes[0];
 					this.setCursorCol(this.state.cursorCol + (firstGrapheme ? firstGrapheme.segment.length : 1));
 				} else if (this.state.cursorLine < this.state.lines.length - 1) {
@@ -1559,7 +1659,7 @@ export class Editor implements Component, Focusable {
 				// Moving left - move by one grapheme (handles emojis, combining characters, etc.)
 				if (this.state.cursorCol > 0) {
 					const beforeCursor = currentLine.slice(0, this.state.cursorCol);
-					const graphemes = [...segmenter.segment(beforeCursor)];
+					const graphemes = [...this.segment(beforeCursor)];
 					const lastGrapheme = graphemes[graphemes.length - 1];
 					this.setCursorCol(this.state.cursorCol - (lastGrapheme ? lastGrapheme.segment.length : 1));
 				} else if (this.state.cursorLine > 0) {
@@ -1603,19 +1703,30 @@ export class Editor implements Component, Focusable {
 		}
 
 		const textBeforeCursor = currentLine.slice(0, this.state.cursorCol);
-		const graphemes = [...segmenter.segment(textBeforeCursor)];
+		const graphemes = [...this.segment(textBeforeCursor)];
 		let newCol = this.state.cursorCol;
 
 		// Skip trailing whitespace
-		while (graphemes.length > 0 && isWhitespaceChar(graphemes[graphemes.length - 1]?.segment || "")) {
+		while (
+			graphemes.length > 0 &&
+			!isPasteMarker(graphemes[graphemes.length - 1]?.segment || "") &&
+			isWhitespaceChar(graphemes[graphemes.length - 1]?.segment || "")
+		) {
 			newCol -= graphemes.pop()?.segment.length || 0;
 		}
 
 		if (graphemes.length > 0) {
 			const lastGrapheme = graphemes[graphemes.length - 1]?.segment || "";
-			if (isPunctuationChar(lastGrapheme)) {
+			if (isPasteMarker(lastGrapheme)) {
+				// Paste marker is a single atomic word
+				newCol -= graphemes.pop()?.segment.length || 0;
+			} else if (isPunctuationChar(lastGrapheme)) {
 				// Skip punctuation run
-				while (graphemes.length > 0 && isPunctuationChar(graphemes[graphemes.length - 1]?.segment || "")) {
+				while (
+					graphemes.length > 0 &&
+					isPunctuationChar(graphemes[graphemes.length - 1]?.segment || "") &&
+					!isPasteMarker(graphemes[graphemes.length - 1]?.segment || "")
+				) {
 					newCol -= graphemes.pop()?.segment.length || 0;
 				}
 			} else {
@@ -1623,7 +1734,8 @@ export class Editor implements Component, Focusable {
 				while (
 					graphemes.length > 0 &&
 					!isWhitespaceChar(graphemes[graphemes.length - 1]?.segment || "") &&
-					!isPunctuationChar(graphemes[graphemes.length - 1]?.segment || "")
+					!isPunctuationChar(graphemes[graphemes.length - 1]?.segment || "") &&
+					!isPasteMarker(graphemes[graphemes.length - 1]?.segment || "")
 				) {
 					newCol -= graphemes.pop()?.segment.length || 0;
 				}
@@ -1818,28 +1930,36 @@ export class Editor implements Component, Focusable {
 		}
 
 		const textAfterCursor = currentLine.slice(this.state.cursorCol);
-		const segments = segmenter.segment(textAfterCursor);
+		const segments = this.segment(textAfterCursor);
 		const iterator = segments[Symbol.iterator]();
 		let next = iterator.next();
 		let newCol = this.state.cursorCol;
 
 		// Skip leading whitespace
-		while (!next.done && isWhitespaceChar(next.value.segment)) {
+		while (!next.done && !isPasteMarker(next.value.segment) && isWhitespaceChar(next.value.segment)) {
 			newCol += next.value.segment.length;
 			next = iterator.next();
 		}
 
 		if (!next.done) {
 			const firstGrapheme = next.value.segment;
-			if (isPunctuationChar(firstGrapheme)) {
+			if (isPasteMarker(firstGrapheme)) {
+				// Paste marker is a single atomic word
+				newCol += firstGrapheme.length;
+			} else if (isPunctuationChar(firstGrapheme)) {
 				// Skip punctuation run
-				while (!next.done && isPunctuationChar(next.value.segment)) {
+				while (!next.done && isPunctuationChar(next.value.segment) && !isPasteMarker(next.value.segment)) {
 					newCol += next.value.segment.length;
 					next = iterator.next();
 				}
 			} else {
 				// Skip word run
-				while (!next.done && !isWhitespaceChar(next.value.segment) && !isPunctuationChar(next.value.segment)) {
+				while (
+					!next.done &&
+					!isWhitespaceChar(next.value.segment) &&
+					!isPunctuationChar(next.value.segment) &&
+					!isPasteMarker(next.value.segment)
+				) {
 					newCol += next.value.segment.length;
 					next = iterator.next();
 				}
@@ -1866,7 +1986,64 @@ export class Editor implements Component, Focusable {
 		return this.isSlashMenuAllowed() && textBeforeCursor.trimStart().startsWith("/");
 	}
 
+	private shouldChainSlashArgumentAutocompleteOnTabSelection(): boolean {
+		if (this.autocompleteState !== "regular") {
+			return false;
+		}
+
+		const currentLine = this.state.lines[this.state.cursorLine] || "";
+		const textBeforeCursor = currentLine.slice(0, this.state.cursorCol);
+		return this.isInSlashCommandContext(textBeforeCursor) && !textBeforeCursor.trimStart().includes(" ");
+	}
+
+	private isBareCompletedSlashCommandAtCursor(): boolean {
+		const currentLine = this.state.lines[this.state.cursorLine] || "";
+		if (this.state.cursorCol !== currentLine.length) {
+			return false;
+		}
+
+		const textBeforeCursor = currentLine.slice(0, this.state.cursorCol).trimStart();
+		return /^\/\S+ $/.test(textBeforeCursor);
+	}
+
 	// Autocomplete methods
+	/**
+	 * Find the best autocomplete item index for the given prefix.
+	 * Returns -1 if no match is found.
+	 *
+	 * Match priority:
+	 * 1. Exact match (prefix === item.value) -> always selected
+	 * 2. Prefix match -> first item whose value starts with prefix
+	 * 3. No match -> -1 (keep default highlight)
+	 *
+	 * Matching is case-sensitive and checks item.value only.
+	 */
+	private getBestAutocompleteMatchIndex(items: Array<{ value: string; label: string }>, prefix: string): number {
+		if (!prefix) return -1;
+
+		let firstPrefixIndex = -1;
+
+		for (let i = 0; i < items.length; i++) {
+			const value = items[i]!.value;
+			if (value === prefix) {
+				return i; // Exact match always wins
+			}
+			if (firstPrefixIndex === -1 && value.startsWith(prefix)) {
+				firstPrefixIndex = i;
+			}
+		}
+
+		return firstPrefixIndex;
+	}
+
+	private createAutocompleteList(
+		prefix: string,
+		items: Array<{ value: string; label: string; description?: string }>,
+	): SelectList {
+		const layout = prefix.startsWith("/") ? SLASH_COMMAND_SELECT_LIST_LAYOUT : undefined;
+		return new SelectList(items, this.autocompleteMaxVisible, this.theme.selectList, layout);
+	}
+
 	private tryTriggerAutocomplete(explicitTab: boolean = false): void {
 		if (!this.autocompleteProvider) return;
 
@@ -1889,7 +2066,14 @@ export class Editor implements Component, Focusable {
 
 		if (suggestions && suggestions.items.length > 0) {
 			this.autocompletePrefix = suggestions.prefix;
-			this.autocompleteList = new SelectList(suggestions.items, this.autocompleteMaxVisible, this.theme.selectList);
+			this.autocompleteList = this.createAutocompleteList(suggestions.prefix, suggestions.items);
+
+			// If typed prefix exactly matches one of the suggestions, select that item
+			const bestMatchIndex = this.getBestAutocompleteMatchIndex(suggestions.items, suggestions.prefix);
+			if (bestMatchIndex >= 0) {
+				this.autocompleteList.setSelectedIndex(bestMatchIndex);
+			}
+
 			this.autocompleteState = "regular";
 		} else {
 			this.cancelAutocomplete();
@@ -1958,7 +2142,14 @@ https://github.com/EsotericSoftware/spine-runtimes/actions/runs/19536643416/job/
 			}
 
 			this.autocompletePrefix = suggestions.prefix;
-			this.autocompleteList = new SelectList(suggestions.items, this.autocompleteMaxVisible, this.theme.selectList);
+			this.autocompleteList = this.createAutocompleteList(suggestions.prefix, suggestions.items);
+
+			// If typed prefix exactly matches one of the suggestions, select that item
+			const bestMatchIndex = this.getBestAutocompleteMatchIndex(suggestions.items, suggestions.prefix);
+			if (bestMatchIndex >= 0) {
+				this.autocompleteList.setSelectedIndex(bestMatchIndex);
+			}
+
 			this.autocompleteState = "force";
 		} else {
 			this.cancelAutocomplete();
@@ -1991,7 +2182,13 @@ https://github.com/EsotericSoftware/spine-runtimes/actions/runs/19536643416/job/
 		if (suggestions && suggestions.items.length > 0) {
 			this.autocompletePrefix = suggestions.prefix;
 			// Always create new SelectList to ensure update
-			this.autocompleteList = new SelectList(suggestions.items, this.autocompleteMaxVisible, this.theme.selectList);
+			this.autocompleteList = this.createAutocompleteList(suggestions.prefix, suggestions.items);
+
+			// If typed prefix exactly matches one of the suggestions, select that item
+			const bestMatchIndex = this.getBestAutocompleteMatchIndex(suggestions.items, suggestions.prefix);
+			if (bestMatchIndex >= 0) {
+				this.autocompleteList.setSelectedIndex(bestMatchIndex);
+			}
 		} else {
 			this.cancelAutocomplete();
 		}

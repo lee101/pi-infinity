@@ -1,8 +1,10 @@
-# 🏖️ OSS Vacation
+<!-- OSS_WEEKEND_START -->
+# 🏖️ OSS Weekend
 
-**Issue tracker and PRs reopen February 23, 2026.**
+**Issue tracker reopens Monday, March 30, 2026.**
 
-All PRs will be auto-closed until then. Approved contributors can submit PRs after vacation without reapproval. For support, join [Discord](https://discord.com/invite/3cU7Bz4UPx).
+OSS weekend runs Sunday, March 22, 2026 through Monday, March 30, 2026. New issues are auto-closed during this time. For support, join [Discord](https://discord.com/invite/3cU7Bz4UPx).
+<!-- OSS_WEEKEND_END -->
 
 ---
 
@@ -76,7 +78,7 @@ pinf
 
 Then just talk to pinf. By default, pinf gives the model four tools: `read`, `write`, `edit`, and `bash`. The model uses these to fulfill your requests. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [pi packages](#pi-packages).
 
-**Platform notes:** [Windows](docs/windows.md) | [Termux (Android)](docs/termux.md) | [Terminal setup](docs/terminal-setup.md) | [Shell aliases](docs/shell-aliases.md)
+**Platform notes:** [Windows](docs/windows.md) | [Termux (Android)](docs/termux.md) | [tmux](docs/tmux.md) | [Terminal setup](docs/terminal-setup.md) | [Shell aliases](docs/shell-aliases.md)
 
 ---
 
@@ -106,6 +108,7 @@ For each built-in provider, pi maintains a list of tool-capable models, updated 
 - Vercel AI Gateway
 - ZAI
 - OpenCode Zen
+- OpenCode Go
 - Hugging Face
 - Kimi For Coding
 - MiniMax
@@ -136,7 +139,7 @@ The editor can be temporarily replaced by other UI, like built-in `/settings` or
 | File reference | Type `@` to fuzzy-search project files |
 | Path completion | Tab to complete paths |
 | Multi-line | Shift+Enter (or Ctrl+Enter on Windows Terminal) |
-| Images | Ctrl+V to paste, or drag onto terminal |
+| Images | Ctrl+V to paste (Alt+V on Windows), or drag onto terminal |
 | Bash commands | `!command` runs and sends output to LLM, `!!command` runs without sending |
 
 Standard editing keybindings for delete word, undo, etc. See [docs/keybindings.md](docs/keybindings.md).
@@ -161,7 +164,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/copy` | Copy last assistant message to clipboard |
 | `/export [file]` | Export session to HTML file |
 | `/share` | Upload as private GitHub gist with shareable HTML link |
-| `/reload` | Reload extensions, skills, prompts, context files (themes hot-reload automatically) |
+| `/reload` | Reload keybindings, extensions, skills, prompts, and context files (themes hot-reload automatically) |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/changelog` | Display version history |
 | `/quit`, `/exit` | Quit pi |
@@ -188,10 +191,12 @@ See `/hotkeys` for the full list. Customize via `~/.pinf/keybindings.json`. See 
 
 Submit messages while the agent is working:
 
-- **Enter** queues a *steering* message, delivered after current tool execution (interrupts remaining tools)
+- **Enter** queues a *steering* message, delivered after the current assistant turn finishes executing its tool calls
 - **Alt+Enter** queues a *follow-up* message, delivered only after the agent finishes all work
 - **Escape** aborts and restores queued messages to editor
 - **Alt+Up** retrieves queued messages back to editor
+
+On Windows Terminal, `Alt+Enter` is fullscreen by default. Remap it in [docs/terminal-setup.md](docs/terminal-setup.md) so pi can receive the follow-up shortcut.
 
 Configure delivery in [settings](docs/settings.md): `steeringMode` and `followUpMode` can be `"one-at-a-time"` (default, waits for response) or `"all"` (delivers all queued at once). `transport` selects provider transport preference (`"sse"`, `"websocket"`, or `"auto"`) for providers that support multiple transports.
 
@@ -210,6 +215,7 @@ pinf -c                  # Continue most recent session
 pinf -r                  # Browse and select from past sessions
 pinf --no-session        # Ephemeral mode (don't save)
 pinf --session <path>    # Use specific session file or ID
+pinf --fork <path>       # Fork specific session file or ID into a new session
 ```
 
 ### Branching
@@ -218,11 +224,13 @@ pinf --session <path>    # Use specific session file or ID
 
 <p align="center"><img src="docs/images/tree-view.png" alt="Tree View" width="600"></p>
 
-- Search by typing, page with ←/→
+- Search by typing, fold/unfold and jump between branches with Ctrl+←/Ctrl+→ or Alt+←/Alt+→, page with ←/→
 - Filter modes (Ctrl+O): default → no-tools → user-only → labeled-only → all
 - Press `l` to label entries as bookmarks
 
 **`/fork`** - Create a new session file from the current branch. Opens a selector, copies history up to the selected point, and places that message in the editor for modification.
+
+**`--fork <path|id>`** - Fork an existing session file or partial session UUID directly from the CLI. This copies the full source session into a new session file in the current project.
 
 ### Compaction
 
@@ -348,12 +356,13 @@ pinf install https://github.com/user/repo@v1      # tag or commit
 pinf install ssh://git@github.com/user/repo
 pinf install ssh://git@github.com/user/repo@v1    # tag or commit
 pinf remove npm:@foo/pi-tools
+pinf uninstall npm:@foo/pi-tools          # alias for remove
 pinf list
 pinf update                               # skips pinned packages
 pinf config                               # enable/disable extensions, skills, prompts, themes
 ```
 
-Packages install to `~/.pinf/git/` (git) or global npm. Use `-l` for project-local installs (`.pinf/git/`, `.pinf/npm/`).
+Packages install to `~/.pinf/git/` (git) or global npm. Use `-l` for project-local installs (`.pinf/git/`, `.pinf/npm/`). If you use a Node version manager and want package installs to reuse a stable npm context, set `npmCommand` in `settings.json`, for example `["mise", "exec", "node@20", "--", "npm"]`.
 
 Create a package by adding a `pi` key to `package.json`:
 
@@ -385,7 +394,7 @@ import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from "
 
 const { session } = await createAgentSession({
   sessionManager: SessionManager.inMemory(),
-  authStorage: new AuthStorage(),
+  authStorage: AuthStorage.create(),
   modelRegistry: new ModelRegistry(authStorage),
 });
 
@@ -401,6 +410,8 @@ For non-Node.js integrations, use RPC mode over stdin/stdout:
 ```bash
 pinf --mode rpc
 ```
+
+RPC mode uses strict LF-delimited JSONL framing. Clients must split records on `\n` only. Do not use generic line readers like Node `readline`, which also split on Unicode separators inside JSON payloads.
 
 See [docs/rpc.md](docs/rpc.md) for the protocol.
 
@@ -435,11 +446,12 @@ pinf [options] [@files...] [messages...]
 ### Package Commands
 
 ```bash
-pinf install <source> [-l]    # Install package, -l for project-local
-pinf remove <source> [-l]     # Remove package
-pinf update [source]          # Update packages (skips pinned)
-pinf list                     # List installed packages
-pinf config                   # Enable/disable package resources
+pinf install <source> [-l]     # Install package, -l for project-local
+pinf remove <source> [-l]      # Remove package
+pinf uninstall <source> [-l]   # Alias for remove
+pinf update [source]           # Update packages (skips pinned)
+pinf list                      # List installed packages
+pinf config                    # Enable/disable package resources
 ```
 
 ### Modes
@@ -451,6 +463,12 @@ pinf config                   # Enable/disable package resources
 | `--mode json` | Output all events as JSON lines (see [docs/json.md](docs/json.md)) |
 | `--mode rpc` | RPC mode for process integration (see [docs/rpc.md](docs/rpc.md)) |
 | `--export <in> [out]` | Export session to HTML |
+
+In print mode, pi also reads piped stdin and merges it into the initial prompt:
+
+```bash
+cat README.md | pi -p "Summarize this text"
+```
 
 ### Model Options
 
@@ -470,6 +488,7 @@ pinf config                   # Enable/disable package resources
 | `-c`, `--continue` | Continue most recent session |
 | `-r`, `--resume` | Browse and select session |
 | `--session <path>` | Use specific session file or partial UUID |
+| `--fork <path>` | Fork specific session file or partial UUID into a new session |
 | `--session-dir <dir>` | Custom session storage directory |
 | `--no-session` | Ephemeral mode (don't save) |
 
@@ -525,6 +544,9 @@ pinf "List all .ts files in src/"
 
 # Non-interactive
 pinf -p "Summarize this codebase"
+
+# Non-interactive with piped stdin
+cat README.md | pi -p "Summarize this text"
 
 # Different model
 pinf --provider openai --model gpt-4o "Help me refactor"

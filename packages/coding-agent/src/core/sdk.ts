@@ -11,7 +11,7 @@ import { ModelRegistry } from "./model-registry.js";
 import { findInitialModel } from "./model-resolver.js";
 import type { ResourceLoader } from "./resource-loader.js";
 import { DefaultResourceLoader } from "./resource-loader.js";
-import { SessionManager } from "./session-manager.js";
+import { getDefaultSessionDir, SessionManager } from "./session-manager.js";
 import { SettingsManager } from "./settings-manager.js";
 import { time } from "./timings.js";
 import {
@@ -35,6 +35,7 @@ import {
 	readTool,
 	type Tool,
 	type ToolName,
+	withFileMutationQueue,
 	writeTool,
 } from "./tools/index.js";
 
@@ -44,7 +45,7 @@ export interface CreateAgentSessionOptions {
 	/** Global config directory. Default: ~/.pi/agent */
 	agentDir?: string;
 
-	/** Auth storage for credentials. Default: new AuthStorage(agentDir/auth.json) */
+	/** Auth storage for credentials. Default: AuthStorage.create(agentDir/auth.json) */
 	authStorage?: AuthStorage;
 	/** Model registry. Default: new ModelRegistry(authStorage, agentDir/models.json) */
 	modelRegistry?: ModelRegistry;
@@ -54,7 +55,7 @@ export interface CreateAgentSessionOptions {
 	/** Thinking level. Default: from settings, else 'medium' (clamped to model capabilities) */
 	thinkingLevel?: ThinkingLevel;
 	/** Models available for cycling (Ctrl+P in interactive mode) */
-	scopedModels?: Array<{ model: Model<any>; thinkingLevel: ThinkingLevel }>;
+	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 
 	/** Built-in tools to use. Default: codingTools [read, bash, edit, write] */
 	tools?: Tool[];
@@ -94,7 +95,6 @@ export type {
 	ExtensionContext,
 	ExtensionFactory,
 	SlashCommandInfo,
-	SlashCommandLocation,
 	SlashCommandSource,
 	ToolDefinition,
 } from "./extensions/index.js";
@@ -114,6 +114,7 @@ export {
 	codingTools,
 	readOnlyTools,
 	allTools as allBuiltInTools,
+	withFileMutationQueue,
 	// Tool factories (for custom cwd)
 	createCodingTools,
 	createReadOnlyTools,
@@ -175,11 +176,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	// Use provided or create AuthStorage and ModelRegistry
 	const authPath = options.agentDir ? join(agentDir, "auth.json") : undefined;
 	const modelsPath = options.agentDir ? join(agentDir, "models.json") : undefined;
-	const authStorage = options.authStorage ?? new AuthStorage(authPath);
+	const authStorage = options.authStorage ?? AuthStorage.create(authPath);
 	const modelRegistry = options.modelRegistry ?? new ModelRegistry(authStorage, modelsPath);
 
 	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
-	const sessionManager = options.sessionManager ?? SessionManager.create(cwd);
+	const sessionManager = options.sessionManager ?? SessionManager.create(cwd, getDefaultSessionDir(cwd, agentDir));
 
 	if (!resourceLoader) {
 		resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
@@ -297,6 +298,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			tools: [],
 		},
 		convertToLlm: convertToLlmWithBlockImages,
+		onPayload: async (payload, _model) => {
+			const runner = extensionRunnerRef.current;
+			if (!runner?.hasHandlers("before_provider_request")) {
+				return payload;
+			}
+			return runner.emitBeforeProviderRequest(payload);
+		},
 		sessionId: sessionManager.getSessionId(),
 		transformContext: async (messages) => {
 			const runner = extensionRunnerRef.current;

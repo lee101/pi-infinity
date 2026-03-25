@@ -1,11 +1,3 @@
-# 🏖️ OSS Vacation
-
-**Issue tracker and PRs reopen February 23, 2026.**
-
-All PRs will be auto-closed until then. Approved contributors can submit PRs after vacation without reapproval. For support, join [Discord](https://discord.com/invite/3cU7Bz4UPx).
-
----
-
 <p align="center">
   <a href="https://codex-infinity.com/">
     <img src="./pi-infinity.webp" alt="Pi Infinity" height="200">
@@ -14,48 +6,67 @@ All PRs will be auto-closed until then. Approved contributors can submit PRs aft
 
 <h1 align="center">Pi Infinity</h1>
 
+<p align="center"><code>npm i -g @codex-infinity/pi-infinity</code></p>
+
 <p align="center"><strong>Pi Infinity</strong> is a coding agent that can run forever.</p>
+
+<p align="center">Run locally or on <a href="https://codex-infinity.com/">bare metal GPU hardware</a>.</p>
 
 ---
 
-## Autonomous Mode
+## What makes Pi Infinity different?
 
-Pi can continuously work on your codebase with two flags:
+Two flags turn Pi into a fully autonomous coding agent:
 
-- **`--auto-next-steps`** - Automatically continues working on the next logical steps after completing a task
-- **`--auto-next-idea`** - Generates and implements new ideas to improve your codebase
+- **`--auto-next-steps`** -- After each response, automatically continues with the next logical steps (including testing)
+- **`--auto-next-idea`** -- Generates and implements new improvement ideas for your codebase
 
 ```shell
-# Run with automatic continuation
-pinf --auto-next-steps
+# Autonomous coding -- completes tasks then moves to the next one
+pinf --auto-next-steps "fix all lint errors and add tests"
 
-# Fully autonomous: dream up and implement improvements
+# Fully autonomous -- dreams up and implements improvements forever
 pinf --auto-next-steps --auto-next-idea
 ```
 
-Run locally or on [bare metal GPU hardware](https://codex-infinity.com/).
+## Quickstart
 
----
+```shell
+npm install -g @codex-infinity/pi-infinity
+```
 
-> **Looking for the pi coding agent?** See **[packages/coding-agent](packages/coding-agent)** for installation and usage.
+Then run `pinf` to get started.
 
-Tools for building AI agents and managing LLM deployments.
+### Authentication
+
+Set your API key for any supported provider:
+
+```shell
+export OPENAI_API_KEY=sk-...
+export ANTHROPIC_API_KEY=sk-ant-...
+export GOOGLE_API_KEY=...
+pinf "your prompt"
+```
+
+## Features
+
+- **Autonomous operation** -- `--auto-next-steps` keeps it working without intervention
+- **Idea generation** -- `--auto-next-idea` brainstorms and implements improvements
+- **AnyLLM** -- OpenAI, Anthropic, Google, local models, bring your own provider
+- **Local execution** -- runs entirely on your machine
+- **GPU cloud** -- deploy on [bare metal GPU hardware](https://codex-infinity.com/) for long-running sessions
 
 ## Packages
 
 | Package | Description |
 |---------|-------------|
+| **[@codex-infinity/pi-infinity](packages/coding-agent)** | Interactive coding agent CLI |
 | **[@mariozechner/pi-ai](packages/ai)** | Unified multi-provider LLM API (OpenAI, Anthropic, Google, etc.) |
 | **[@mariozechner/pi-agent-core](packages/agent)** | Agent runtime with tool calling and state management |
-| **[@mariozechner/pi-coding-agent](packages/coding-agent)** | Interactive coding agent CLI |
 | **[@mariozechner/pi-mom](packages/mom)** | Slack bot that delegates messages to the pi coding agent |
 | **[@mariozechner/pi-tui](packages/tui)** | Terminal UI library with differential rendering |
 | **[@mariozechner/pi-web-ui](packages/web-ui)** | Web components for AI chat interfaces |
 | **[@mariozechner/pi-pods](packages/pods)** | CLI for managing vLLM deployments on GPU pods |
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [AGENTS.md](AGENTS.md) for project-specific rules (for both humans and agents).
 
 ## Development
 
@@ -67,7 +78,9 @@ npm run check        # Lint, format, and type check
 ./pi-test.sh         # Run pi from sources (must be run from repo root)
 ```
 
-> **Note:** `npm run check` requires `npm run build` to be run first. The web-ui package uses `tsc` which needs compiled `.d.ts` files from dependencies.
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [AGENTS.md](AGENTS.md) for project-specific rules.
 
 ## License
 

@@ -25,8 +25,14 @@ describe("buildSystemPrompt", () => {
 	});
 
 	describe("default tools", () => {
-		test("includes all default tools", () => {
+		test("includes all default tools when snippets are provided", () => {
 			const prompt = buildSystemPrompt({
+				toolSnippets: {
+					read: "Read file contents",
+					bash: "Execute bash commands",
+					edit: "Make surgical edits",
+					write: "Create or overwrite files",
+				},
 				contextFiles: [],
 				skills: [],
 			});
@@ -35,6 +41,55 @@ describe("buildSystemPrompt", () => {
 			expect(prompt).toContain("- bash:");
 			expect(prompt).toContain("- edit:");
 			expect(prompt).toContain("- write:");
+		});
+	});
+
+	describe("custom tool snippets", () => {
+		test("includes custom tools in available tools section when promptSnippet is provided", () => {
+			const prompt = buildSystemPrompt({
+				selectedTools: ["read", "dynamic_tool"],
+				toolSnippets: {
+					dynamic_tool: "Run dynamic test behavior",
+				},
+				contextFiles: [],
+				skills: [],
+			});
+
+			expect(prompt).toContain("- dynamic_tool: Run dynamic test behavior");
+		});
+
+		test("omits custom tools from available tools section when promptSnippet is not provided", () => {
+			const prompt = buildSystemPrompt({
+				selectedTools: ["read", "dynamic_tool"],
+				contextFiles: [],
+				skills: [],
+			});
+
+			expect(prompt).not.toContain("dynamic_tool");
+		});
+	});
+
+	describe("prompt guidelines", () => {
+		test("appends promptGuidelines to default guidelines", () => {
+			const prompt = buildSystemPrompt({
+				selectedTools: ["read", "dynamic_tool"],
+				promptGuidelines: ["Use dynamic_tool for project summaries."],
+				contextFiles: [],
+				skills: [],
+			});
+
+			expect(prompt).toContain("- Use dynamic_tool for project summaries.");
+		});
+
+		test("deduplicates and trims promptGuidelines", () => {
+			const prompt = buildSystemPrompt({
+				selectedTools: ["read", "dynamic_tool"],
+				promptGuidelines: ["Use dynamic_tool for summaries.", "  Use dynamic_tool for summaries.  ", "   "],
+				contextFiles: [],
+				skills: [],
+			});
+
+			expect(prompt.match(/- Use dynamic_tool for summaries\./g)).toHaveLength(1);
 		});
 	});
 });

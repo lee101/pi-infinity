@@ -85,8 +85,11 @@ export const streamAzureOpenAIResponses: StreamFunction<"azure-openai-responses"
 			// Create Azure OpenAI client
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
 			const client = createClient(model, apiKey, options);
-			const params = buildParams(model, context, options, deploymentName);
-			options?.onPayload?.(params);
+			let params = buildParams(model, context, options, deploymentName);
+			const nextParams = await options?.onPayload?.(params, model);
+			if (nextParams !== undefined) {
+				params = nextParams as ResponseCreateParamsStreaming;
+			}
 			const openaiStream = await client.responses.create(
 				params,
 				options?.signal ? { signal: options.signal } : undefined,
@@ -237,18 +240,7 @@ function buildParams(
 			};
 			params.include = ["reasoning.encrypted_content"];
 		} else {
-			if (model.name.toLowerCase().startsWith("gpt-5")) {
-				// Jesus Christ, see https://community.openai.com/t/need-reasoning-false-option-for-gpt-5/1351588/7
-				messages.push({
-					role: "developer",
-					content: [
-						{
-							type: "input_text",
-							text: "# Juice: 0 !important",
-						},
-					],
-				});
-			}
+			params.reasoning = { effort: "none" };
 		}
 	}
 

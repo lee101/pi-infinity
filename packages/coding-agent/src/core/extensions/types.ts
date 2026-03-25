@@ -55,6 +55,7 @@ import type {
 	SessionManager,
 } from "../session-manager.js";
 import type { SlashCommandInfo } from "../slash-commands.js";
+import type { SourceInfo } from "../source-info.js";
 import type { BashOperations } from "../tools/bash.js";
 import type { EditToolDetails } from "../tools/edit.js";
 import type {
@@ -74,7 +75,7 @@ import type {
 
 export type { ExecOptions, ExecResult } from "../exec.js";
 export type { AgentToolResult, AgentToolUpdateCallback };
-export type { AppAction, KeybindingsManager } from "../keybindings.js";
+export type { AppKeybinding, KeybindingsManager } from "../keybindings.js";
 
 // ============================================================================
 // UI Context
@@ -329,16 +330,48 @@ export interface ToolRenderResultOptions {
 	isPartial: boolean;
 }
 
+/** Context passed to tool renderers. */
+export interface ToolRenderContext<TState = any, TArgs = any> {
+	/** Current tool call arguments. Shared across call/result renders for the same tool call. */
+	args: TArgs;
+	/** Unique id for this tool execution. Stable across call/result renders for the same tool call. */
+	toolCallId: string;
+	/** Invalidate just this tool execution component for redraw. */
+	invalidate: () => void;
+	/** Previously returned component for this render slot, if any. */
+	lastComponent: Component | undefined;
+	/** Shared renderer state for this tool row. Initialized by tool-execution.ts. */
+	state: TState;
+	/** Working directory for this tool execution. */
+	cwd: string;
+	/** Whether the tool execution has started. */
+	executionStarted: boolean;
+	/** Whether the tool call arguments are complete. */
+	argsComplete: boolean;
+	/** Whether the tool result is partial/streaming. */
+	isPartial: boolean;
+	/** Whether the result view is expanded. */
+	expanded: boolean;
+	/** Whether inline images are currently shown in the TUI. */
+	showImages: boolean;
+	/** Whether the current result is an error. */
+	isError: boolean;
+}
+
 /**
  * Tool definition for registerTool().
  */
-export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = unknown> {
+export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = unknown, TState = any> {
 	/** Tool name (used in LLM tool calls) */
 	name: string;
 	/** Human-readable label for UI */
 	label: string;
 	/** Description for LLM */
 	description: string;
+	/** Optional one-line snippet for the Available tools section in the default system prompt. Custom tools are omitted from that section when this is not provided. */
+	promptSnippet?: string;
+	/** Optional guideline bullets appended to the default system prompt Guidelines section when this tool is active. */
+	promptGuidelines?: string[];
 	/** Parameter schema (TypeBox) */
 	parameters: TParams;
 
@@ -352,10 +385,15 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 	): Promise<AgentToolResult<TDetails>>;
 
 	/** Custom rendering for tool call display */
-	renderCall?: (args: Static<TParams>, theme: Theme) => Component;
+	renderCall?: (args: Static<TParams>, theme: Theme, context: ToolRenderContext<TState, Static<TParams>>) => Component;
 
 	/** Custom rendering for tool result display */
-	renderResult?: (result: AgentToolResult<TDetails>, options: ToolRenderResultOptions, theme: Theme) => Component;
+	renderResult?: (
+		result: AgentToolResult<TDetails>,
+		options: ToolRenderResultOptions,
+		theme: Theme,
+		context: ToolRenderContext<TState, Static<TParams>>,
+	) => Component;
 }
 
 // ============================================================================
@@ -379,6 +417,12 @@ export interface ResourcesDiscoverResult {
 // ============================================================================
 // Session Events
 // ============================================================================
+
+/** Fired before session manager creation to allow custom session directory resolution */
+export interface SessionDirectoryEvent {
+	type: "session_directory";
+	cwd: string;
+}
 
 /** Fired on initial session load */
 export interface SessionStartEvent {
@@ -464,6 +508,7 @@ export interface SessionTreeEvent {
 }
 
 export type SessionEvent =
+	| SessionDirectoryEvent
 	| SessionStartEvent
 	| SessionBeforeSwitchEvent
 	| SessionSwitchEvent
@@ -483,6 +528,12 @@ export type SessionEvent =
 export interface ContextEvent {
 	type: "context";
 	messages: AgentMessage[];
+}
+
+/** Fired before a provider request is sent. Can replace the payload. */
+export interface BeforeProviderRequestEvent {
+	type: "before_provider_request";
+	payload: unknown;
 }
 
 /** Fired after user submits prompt but before agent loop. */
@@ -799,6 +850,7 @@ export type ExtensionEvent =
 	| ResourcesDiscoverEvent
 	| SessionEvent
 	| ContextEvent
+	| BeforeProviderRequestEvent
 	| BeforeAgentStartEvent
 	| AgentStartEvent
 	| AgentEndEvent
@@ -824,6 +876,8 @@ export interface ContextEventResult {
 	messages?: AgentMessage[];
 }
 
+export type BeforeProviderRequestEventResult = unknown;
+
 export interface ToolCallEventResult {
 	block?: boolean;
 	reason?: string;
@@ -848,6 +902,16 @@ export interface BeforeAgentStartEventResult {
 	/** Replace the system prompt for this turn. If multiple extensions return this, they are chained. */
 	systemPrompt?: string;
 }
+
+export interface SessionDirectoryResult {
+	/** Custom session directory path. If multiple extensions return this, the last one wins. */
+	sessionDir?: string;
+}
+
+/** Special startup-only handler. Unlike other events, this receives no ExtensionContext. */
+export type SessionDirectoryHandler = (
+	event: SessionDirectoryEvent,
+) => Promise<SessionDirectoryResult | undefined> | SessionDirectoryResult | undefined;
 
 export interface SessionBeforeSwitchResult {
 	cancel?: boolean;
@@ -897,9 +961,14 @@ export type MessageRenderer<T = unknown> = (
 
 export interface RegisteredCommand {
 	name: string;
+	sourceInfo: SourceInfo;
 	description?: string;
 	getArgumentCompletions?: (argumentPrefix: string) => AutocompleteItem[] | null;
 	handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
+}
+
+export interface ResolvedCommand extends RegisteredCommand {
+	invocationName: string;
 }
 
 // ============================================================================
@@ -919,6 +988,7 @@ export interface ExtensionAPI {
 	// =========================================================================
 
 	on(event: "resources_discover", handler: ExtensionHandler<ResourcesDiscoverEvent, ResourcesDiscoverResult>): void;
+	on(event: "session_directory", handler: SessionDirectoryHandler): void;
 	on(event: "session_start", handler: ExtensionHandler<SessionStartEvent>): void;
 	on(
 		event: "session_before_switch",
@@ -936,6 +1006,10 @@ export interface ExtensionAPI {
 	on(event: "session_before_tree", handler: ExtensionHandler<SessionBeforeTreeEvent, SessionBeforeTreeResult>): void;
 	on(event: "session_tree", handler: ExtensionHandler<SessionTreeEvent>): void;
 	on(event: "context", handler: ExtensionHandler<ContextEvent, ContextEventResult>): void;
+	on(
+		event: "before_provider_request",
+		handler: ExtensionHandler<BeforeProviderRequestEvent, BeforeProviderRequestEventResult>,
+	): void;
 	on(event: "before_agent_start", handler: ExtensionHandler<BeforeAgentStartEvent, BeforeAgentStartEventResult>): void;
 	on(event: "agent_start", handler: ExtensionHandler<AgentStartEvent>): void;
 	on(event: "agent_end", handler: ExtensionHandler<AgentEndEvent>): void;
@@ -958,14 +1032,16 @@ export interface ExtensionAPI {
 	// =========================================================================
 
 	/** Register a tool that the LLM can call. */
-	registerTool<TParams extends TSchema = TSchema, TDetails = unknown>(tool: ToolDefinition<TParams, TDetails>): void;
+	registerTool<TParams extends TSchema = TSchema, TDetails = unknown, TState = any>(
+		tool: ToolDefinition<TParams, TDetails, TState>,
+	): void;
 
 	// =========================================================================
 	// Command, Shortcut, Flag Registration
 	// =========================================================================
 
 	/** Register a custom command. */
-	registerCommand(name: string, options: Omit<RegisteredCommand, "name">): void;
+	registerCommand(name: string, options: Omit<RegisteredCommand, "name" | "sourceInfo">): void;
 
 	/** Register a keyboard shortcut. */
 	registerShortcut(
@@ -1037,7 +1113,7 @@ export interface ExtensionAPI {
 	/** Get the list of currently active tool names. */
 	getActiveTools(): string[];
 
-	/** Get all configured tools with name and description. */
+	/** Get all configured tools with parameter schema and source metadata. */
 	getAllTools(): ToolInfo[];
 
 	/** Set the active tools by name. */
@@ -1070,6 +1146,11 @@ export interface ExtensionAPI {
 	 * If only `baseUrl` is provided: overrides the URL for existing models.
 	 * If `oauth` is provided: registers OAuth provider for /login support.
 	 * If `streamSimple` is provided: registers a custom API stream handler.
+	 *
+	 * During initial extension load this call is queued and applied once the
+	 * runner has bound its context. After that it takes effect immediately, so
+	 * it is safe to call from command handlers or event callbacks without
+	 * requiring a `/reload`.
 	 *
 	 * @example
 	 * // Register a new provider with custom models
@@ -1111,6 +1192,21 @@ export interface ExtensionAPI {
 	 * });
 	 */
 	registerProvider(name: string, config: ProviderConfig): void;
+
+	/**
+	 * Unregister a previously registered provider.
+	 *
+	 * Removes all models belonging to the named provider and restores any
+	 * built-in models that were overridden by it. Has no effect if the provider
+	 * is not currently registered.
+	 *
+	 * Like `registerProvider`, this takes effect immediately when called after
+	 * the initial load phase.
+	 *
+	 * @example
+	 * pi.unregisterProvider("my-proxy");
+	 */
+	unregisterProvider(name: string): void;
 
 	/** Shared event bus for extension communication. */
 	events: EventBus;
@@ -1184,7 +1280,7 @@ export type ExtensionFactory = (pi: ExtensionAPI) => void | Promise<void>;
 
 export interface RegisteredTool {
 	definition: ToolDefinition;
-	extensionPath: string;
+	sourceInfo: SourceInfo;
 }
 
 export interface ExtensionFlag {
@@ -1222,14 +1318,18 @@ export type GetSessionNameHandler = () => string | undefined;
 
 export type GetActiveToolsHandler = () => string[];
 
-/** Tool info with name, description, and parameter schema */
-export type ToolInfo = Pick<ToolDefinition, "name" | "description" | "parameters">;
+/** Tool info with name, description, parameter schema, and source metadata */
+export type ToolInfo = Pick<ToolDefinition, "name" | "description" | "parameters"> & {
+	sourceInfo: SourceInfo;
+};
 
 export type GetAllToolsHandler = () => ToolInfo[];
 
 export type GetCommandsHandler = () => SlashCommandInfo[];
 
 export type SetActiveToolsHandler = (toolNames: string[]) => void;
+
+export type RefreshToolsHandler = () => void;
 
 export type SetModelHandler = (model: Model<any>) => Promise<boolean>;
 
@@ -1246,7 +1346,15 @@ export type SetLabelHandler = (entryId: string, label: string | undefined) => vo
 export interface ExtensionRuntimeState {
 	flagValues: Map<string, boolean | string>;
 	/** Provider registrations queued during extension loading, processed when runner binds */
-	pendingProviderRegistrations: Array<{ name: string; config: ProviderConfig }>;
+	pendingProviderRegistrations: Array<{ name: string; config: ProviderConfig; extensionPath: string }>;
+	/**
+	 * Register or unregister a provider.
+	 *
+	 * Before bindCore(): queues registrations / removes from queue.
+	 * After bindCore(): calls ModelRegistry directly for immediate effect.
+	 */
+	registerProvider: (name: string, config: ProviderConfig, extensionPath?: string) => void;
+	unregisterProvider: (name: string, extensionPath?: string) => void;
 }
 
 /**
@@ -1263,6 +1371,7 @@ export interface ExtensionActions {
 	getActiveTools: GetActiveToolsHandler;
 	getAllTools: GetAllToolsHandler;
 	setActiveTools: SetActiveToolsHandler;
+	refreshTools: RefreshToolsHandler;
 	getCommands: GetCommandsHandler;
 	setModel: SetModelHandler;
 	getThinkingLevel: GetThinkingLevelHandler;
@@ -1313,6 +1422,7 @@ export interface ExtensionRuntime extends ExtensionRuntimeState, ExtensionAction
 export interface Extension {
 	path: string;
 	resolvedPath: string;
+	sourceInfo: SourceInfo;
 	handlers: Map<string, HandlerFn[]>;
 	tools: Map<string, RegisteredTool>;
 	messageRenderers: Map<string, MessageRenderer>;

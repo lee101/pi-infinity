@@ -12,14 +12,15 @@
  */
 
 import * as crypto from "node:crypto";
-import * as readline from "readline";
 import type { AgentSession } from "../../core/agent-session.js";
 import type {
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
 	ExtensionWidgetOptions,
 } from "../../core/extensions/index.js";
+import { takeOverStdout, writeRawStdout } from "../../core/output-guard.js";
 import { type Theme, theme } from "../interactive/theme/theme.js";
+import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
 import type {
 	RpcCommand,
 	RpcExtensionUIRequest,
@@ -43,8 +44,10 @@ export type {
  * Listens for JSON commands on stdin, outputs events and responses on stdout.
  */
 export async function runRpcMode(session: AgentSession): Promise<never> {
+	takeOverStdout();
+
 	const output = (obj: RpcResponse | RpcExtensionUIRequest | object) => {
-		console.log(JSON.stringify(obj));
+		writeRawStdout(serializeJsonLine(obj));
 	};
 
 	const success = <T extends RpcCommand["type"]>(
@@ -541,35 +544,30 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 			case "get_commands": {
 				const commands: RpcSlashCommand[] = [];
 
-				// Extension commands
-				for (const { command, extensionPath } of session.extensionRunner?.getRegisteredCommandsWithPaths() ?? []) {
+				for (const command of session.extensionRunner?.getRegisteredCommands() ?? []) {
 					commands.push({
-						name: command.name,
+						name: command.invocationName,
 						description: command.description,
 						source: "extension",
-						path: extensionPath,
+						sourceInfo: command.sourceInfo,
 					});
 				}
 
-				// Prompt templates (source is always "user" | "project" | "path" in coding-agent)
 				for (const template of session.promptTemplates) {
 					commands.push({
 						name: template.name,
 						description: template.description,
 						source: "prompt",
-						location: template.source as RpcSlashCommand["location"],
-						path: template.filePath,
+						sourceInfo: template.sourceInfo,
 					});
 				}
 
-				// Skills (source is always "user" | "project" | "path" in coding-agent)
 				for (const skill of session.resourceLoader.getSkills().skills) {
 					commands.push({
 						name: `skill:${skill.name}`,
 						description: skill.description,
 						source: "skill",
-						location: skill.source as RpcSlashCommand["location"],
-						path: skill.filePath,
+						sourceInfo: skill.sourceInfo,
 					});
 				}
 
@@ -587,27 +585,25 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 	 * Check if shutdown was requested and perform shutdown if so.
 	 * Called after handling each command when waiting for the next command.
 	 */
-	async function checkShutdownRequested(): Promise<void> {
-		if (!shutdownRequested) return;
+	let detachInput = () => {};
 
+	async function shutdown(): Promise<never> {
 		const currentRunner = session.extensionRunner;
 		if (currentRunner?.hasHandlers("session_shutdown")) {
 			await currentRunner.emit({ type: "session_shutdown" });
 		}
 
-		// Close readline interface to stop waiting for input
-		rl.close();
+		detachInput();
+		process.stdin.pause();
 		process.exit(0);
 	}
 
-	// Listen for JSON input
-	const rl = readline.createInterface({
-		input: process.stdin,
-		output: process.stdout,
-		terminal: false,
-	});
+	async function checkShutdownRequested(): Promise<void> {
+		if (!shutdownRequested) return;
+		await shutdown();
+	}
 
-	rl.on("line", async (line: string) => {
+	const handleInputLine = async (line: string) => {
 		try {
 			const parsed = JSON.parse(line);
 
@@ -632,7 +628,22 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 		} catch (e: any) {
 			output(error(undefined, "parse", `Failed to parse command: ${e.message}`));
 		}
-	});
+	};
+
+	const onInputEnd = () => {
+		void shutdown();
+	};
+	process.stdin.on("end", onInputEnd);
+
+	detachInput = (() => {
+		const detachJsonl = attachJsonlLineReader(process.stdin, (line) => {
+			void handleInputLine(line);
+		});
+		return () => {
+			detachJsonl();
+			process.stdin.off("end", onInputEnd);
+		};
+	})();
 
 	// Keep process alive forever
 	return new Promise(() => {});

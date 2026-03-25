@@ -2,6 +2,83 @@
 
 ## [Unreleased]
 
+## [0.62.0] - 2026-03-23
+
+## [0.61.1] - 2026-03-20
+
+## [0.61.0] - 2026-03-20
+
+## [0.60.0] - 2026-03-18
+
+## [0.59.0] - 2026-03-17
+
+### Added
+
+- Exported `CustomProviderDialog` from `@mariozechner/pi-web-ui` ([#2267](https://github.com/badlogic/pi-mono/issues/2267))
+
+## [0.58.4] - 2026-03-16
+
+### Added
+
+- `onModelSelect` callback on `AgentInterface` and `ChatPanel.setAgent` config
+- `allowedProviders` filter on `ModelSelector.open()` to restrict visible models
+- `onClose` callback on `SettingsDialog.open()`
+- `state_change` event emitted by Agent on `setModel()` and `setThinkingLevel()`
+- Subsequence-based fuzzy search in model selector (replaces substring matching)
+- `openai-codex` and `github-copilot` to `shouldUseProxyForProvider`
+
+### Changed
+
+- Anthropic test model updated from `claude-3-5-haiku-20241022` to `claude-haiku-4-5`
+
+### Fixed
+
+- `AgentInterface` clears streaming container on `message_end` to prevent duplicate tool rendering
+
+## [0.58.3] - 2026-03-15
+
+### Fixed
+
+- Build `@mariozechner/pi-web-ui` with `tsc` instead of `tsgo` so Lit decorator-based state updates rerender correctly.
+
+## [0.58.2] - 2026-03-15
+
+## [0.58.1] - 2026-03-14
+
+## [0.58.0] - 2026-03-14
+
+## [0.57.1] - 2026-03-07
+
+## [0.57.0] - 2026-03-07
+
+## [0.56.3] - 2026-03-06
+
+## [0.56.2] - 2026-03-05
+
+## [0.56.1] - 2026-03-05
+
+## [0.56.0] - 2026-03-04
+
+## [0.55.4] - 2026-03-02
+
+## [0.55.3] - 2026-02-27
+
+## [0.55.2] - 2026-02-27
+
+## [0.55.1] - 2026-02-26
+
+## [0.55.0] - 2026-02-24
+
+## [0.54.2] - 2026-02-23
+
+## [0.54.1] - 2026-02-22
+
+## [0.54.0] - 2026-02-19
+
+## [0.53.1] - 2026-02-19
+
+## [0.53.0] - 2026-02-17
+
 ## [0.52.12] - 2026-02-13
 
 ## [0.52.11] - 2026-02-13

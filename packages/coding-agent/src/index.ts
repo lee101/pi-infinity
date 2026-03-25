@@ -14,7 +14,15 @@ export {
 	type SessionStats,
 } from "./core/agent-session.js";
 // Auth and model registry
-export { type ApiKeyCredential, type AuthCredential, AuthStorage, type OAuthCredential } from "./core/auth-storage.js";
+export {
+	type ApiKeyCredential,
+	type AuthCredential,
+	AuthStorage,
+	type AuthStorageBackend,
+	FileAuthStorageBackend,
+	InMemoryAuthStorageBackend,
+	type OAuthCredential,
+} from "./core/auth-storage.js";
 // Compaction
 export {
 	type BranchPreparation,
@@ -45,9 +53,11 @@ export type {
 	AgentStartEvent,
 	AgentToolResult,
 	AgentToolUpdateCallback,
-	AppAction,
+	AppKeybinding,
 	BashToolCallEvent,
 	BeforeAgentStartEvent,
+	BeforeProviderRequestEvent,
+	BeforeProviderRequestEventResult,
 	CompactOptions,
 	ContextEvent,
 	ContextUsage,
@@ -87,6 +97,7 @@ export type {
 	ReadToolCallEvent,
 	RegisteredCommand,
 	RegisteredTool,
+	ResolvedCommand,
 	SessionBeforeCompactEvent,
 	SessionBeforeForkEvent,
 	SessionBeforeSwitchEvent,
@@ -98,10 +109,11 @@ export type {
 	SessionSwitchEvent,
 	SessionTreeEvent,
 	SlashCommandInfo,
-	SlashCommandLocation,
 	SlashCommandSource,
+	SourceInfo,
 	TerminalInputHandler,
 	ToolCallEvent,
+	ToolCallEventResult,
 	ToolDefinition,
 	ToolInfo,
 	ToolRenderResultOptions,
@@ -127,8 +139,6 @@ export {
 	isWriteToolResult,
 	wrapRegisteredTool,
 	wrapRegisteredTools,
-	wrapToolsWithExtensions,
-	wrapToolWithExtensions,
 } from "./core/extensions/index.js";
 // Footer data provider (git branch + extension statuses - data not otherwise available to extensions)
 export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.js";
@@ -205,6 +215,7 @@ export {
 	type Skill,
 	type SkillFrontmatter,
 } from "./core/skills.js";
+export { createSyntheticSourceInfo } from "./core/source-info.js";
 // Tools
 export {
 	type BashOperations,
@@ -214,7 +225,16 @@ export {
 	type BashToolInput,
 	type BashToolOptions,
 	bashTool,
+	bashToolDefinition,
 	codingTools,
+	createBashToolDefinition,
+	createEditToolDefinition,
+	createFindToolDefinition,
+	createGrepToolDefinition,
+	createLocalBashOperations,
+	createLsToolDefinition,
+	createReadToolDefinition,
+	createWriteToolDefinition,
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
 	type EditOperations,
@@ -222,27 +242,32 @@ export {
 	type EditToolInput,
 	type EditToolOptions,
 	editTool,
+	editToolDefinition,
 	type FindOperations,
 	type FindToolDetails,
 	type FindToolInput,
 	type FindToolOptions,
 	findTool,
+	findToolDefinition,
 	formatSize,
 	type GrepOperations,
 	type GrepToolDetails,
 	type GrepToolInput,
 	type GrepToolOptions,
 	grepTool,
+	grepToolDefinition,
 	type LsOperations,
 	type LsToolDetails,
 	type LsToolInput,
 	type LsToolOptions,
 	lsTool,
+	lsToolDefinition,
 	type ReadOperations,
 	type ReadToolDetails,
 	type ReadToolInput,
 	type ReadToolOptions,
 	readTool,
+	readToolDefinition,
 	type ToolsOptions,
 	type TruncationOptions,
 	type TruncationResult,
@@ -252,7 +277,9 @@ export {
 	type WriteOperations,
 	type WriteToolInput,
 	type WriteToolOptions,
+	withFileMutationQueue,
 	writeTool,
+	writeToolDefinition,
 } from "./core/tools/index.js";
 // Main entry point
 export { main } from "./main.js";
@@ -268,8 +295,6 @@ export {
 export {
 	ArminComponent,
 	AssistantMessageComponent,
-	appKey,
-	appKeyHint,
 	BashExecutionComponent,
 	BorderedLoader,
 	BranchSummaryMessageComponent,
@@ -280,9 +305,9 @@ export {
 	ExtensionEditorComponent,
 	ExtensionInputComponent,
 	ExtensionSelectorComponent,
-	editorKey,
 	FooterComponent,
 	keyHint,
+	keyText,
 	LoginDialogComponent,
 	ModelSelectorComponent,
 	OAuthSelectorComponent,

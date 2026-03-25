@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -eo pipefail
 
 REPO_DIR="/home/lee/code/pi-infinity"
 LOG_DIR="$REPO_DIR/scripts/logs"
@@ -9,64 +9,92 @@ mkdir -p "$LOG_DIR"
 exec > >(tee -a "$LOG_FILE") 2>&1
 echo "=== Pi Infinity upstream sync started at $(date) ==="
 
-# Source nvm for node/npm access in cron
-export NVM_DIR="/home/lee/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-export PATH="/home/lee/.bun/bin:$PATH"
+export HOME="/home/lee"
+export PATH="$HOME/.bun/bin:$HOME/.cargo/bin:$HOME/.nvm/versions/node/v22.17.0/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+
+set +e
+[ -f "$HOME/.profile" ] && source "$HOME/.profile" 2>/dev/null
+[ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc" 2>/dev/null
+set -e
+
+[ -f "$HOME/.cron-env" ] && source "$HOME/.cron-env"
+
+# unset ANTHROPIC_API_KEY so claude uses its default auth
+unset ANTHROPIC_API_KEY
+
+for cmd in claude npm git node; do
+    command -v "$cmd" >/dev/null || { echo "FATAL: $cmd not found in PATH"; exit 1; }
+done
+
+export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/codex_agent_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
 
 cd "$REPO_DIR"
 
-git fetch upstream 2>/dev/null || { git remote add upstream git@github.com:badlogic/pi-mono.git && git fetch upstream; }
+if ! git remote get-url upstream &>/dev/null; then
+    git remote add upstream https://github.com/badlogic/pi-mono.git
+fi
 
-UPSTREAM_HEAD=$(git rev-parse upstream/main)
-LOCAL_HEAD=$(git rev-parse HEAD)
+# ensure upstream uses HTTPS (not SSH) for fetch
+git remote set-url upstream https://github.com/badlogic/pi-mono.git
 
-if [ "$UPSTREAM_HEAD" = "$LOCAL_HEAD" ]; then
+git fetch upstream
+
+UPSTREAM_ALREADY_MERGED=$(git merge-base --is-ancestor upstream/main HEAD 2>/dev/null && echo "yes" || echo "no")
+
+if [ "$UPSTREAM_ALREADY_MERGED" = "yes" ]; then
     echo "Already up to date with upstream. Nothing to do."
     exit 0
 fi
 
-echo "Upstream has new commits. Running Claude to merge..."
+BEHIND_COUNT=$(git rev-list HEAD..upstream/main --count)
+echo "Upstream has $BEHIND_COUNT new commits. Running Claude to merge..."
 
-CLAUDECODE= claude -p --dangerously-skip-permissions --model opus --verbose <<'PROMPT'
-You are maintaining the Pi Infinity fork (badlogic/pi-mono -> lee101/pi-infinity). Merge upstream/main into our main branch carefully.
+timeout 3600 claude -p --dangerously-skip-permissions --model sonnet --verbose <<'PROMPT'
+You are the automated daily sync bot for Pi Infinity, a fork of badlogic/pi-mono.
+Your job: merge upstream/main into our main branch, preserve all customizations, verify everything works, and deploy.
 
-CRITICAL: Maintain ALL of these Pi Infinity customizations:
+OUR CUSTOMIZATIONS (preserve ALL of these -- if a merge conflict touches these, keep OURS):
 
-1. CLI flags: --auto-next-steps and --auto-next-idea in packages/coding-agent/src/cli/args.ts and their implementation in packages/coding-agent/src/main.ts, packages/coding-agent/src/core/agent-session.ts, packages/coding-agent/src/core/sdk.ts
-2. NPM package: @codex-infinity/pinf in packages/coding-agent/package.json
-3. piConfig branding: name="pinf", configDir=".pinf" in packages/coding-agent/package.json
-4. Binary entry point: packages/coding-agent/bin/ should have pinf entry
-5. README.md: Keep our Pi Infinity branded README with the autonomous mode docs, NOT upstream's
-6. packages/coding-agent/README.md: Keep our "pinf" branding (not "pi")
-7. pi-infinity.webp logo file
-8. .gitignore: Keep .pi and .pinf entries
-9. Update check in packages/coding-agent/src/config.ts: Must query @codex-infinity/pinf on npm, not upstream package. getUpdateInstruction() points to github.com/lee101/pi-infinity/releases/latest
-10. Concise system prompts: packages/coding-agent/src/core/system-prompt.ts should stay concise and focused
-11. The pre-commit hook in .husky/pre-commit uses `git add -f` for restaging (needed for gitignored .pi files)
-12. docs/AUTONOMOUS_MODE.md and related docs (AUTONOMOUS_FEATURES_SUMMARY.md, CHANGELOG_AUTONOMOUS.md) - keep these
-13. .pi/settings.json has custom defaults (defaultProvider, defaultModel, defaultThinkingLevel)
-14. .pi/prompts/*.md has concise custom prompts (is.md, pr.md, cl.md) for issue/PR/changelog workflows
+1. NPM package name: @codex-infinity/pi-infinity in packages/coding-agent/package.json
+2. The mom package depends on @codex-infinity/pi-infinity (packages/mom/package.json)
+3. README.md: keep our Pi Infinity branded README, NOT the upstream one
+4. Logo/branding files: pi-infinity.webp and any .github/pi-infinity-* files
+5. .pi/ and .pinf/ directories contain our custom settings
+6. AGENTS.md: keep our version if it differs from upstream
+7. scripts/daily-upstream-sync.sh: keep ours
+8. CLI flags: --auto-next-steps and --auto-next-idea in packages/coding-agent/src/cli/args.ts
 
-If upstream added NEW models or provider files, check if they have verbose prompts and simplify them to match our concise style.
-If upstream changed CLI arg structures, adapt our --auto-next-steps and --auto-next-idea flags to match the new structure.
+STEPS (execute in order):
+1. Run: git diff HEAD..upstream/main --stat (understand what changed)
+2. Run: git merge upstream/main --no-edit
+3. If conflicts: resolve them preserving our customizations. For branding/naming/README, ALWAYS keep ours. For lock files accept theirs.
+4. Verify our customizations are intact:
+   - grep -q "pi-infinity" packages/coding-agent/package.json
+   - grep -q "pi-infinity" README.md
+   If any check fails, investigate and fix.
+5. Run: cd /home/lee/code/pi-infinity && npm install
+6. Run: cd /home/lee/code/pi-infinity && npm run build
+7. Run: cd /home/lee/code/pi-infinity && npm test (if tests exist)
+8. Bump patch version: cd /home/lee/code/pi-infinity && npm version patch -ws --no-git-tag-version && node scripts/sync-versions.js
+9. Run: npm install (to update lock file with new versions)
+10. Commit all changes with message: "Pi Infinity vX.Y.Z - merge upstream + maintain custom features"
+11. Run: git push origin main
+12. Run: cd /home/lee/code/pi-infinity && npm publish -ws --access public
 
-Steps:
-1. git merge upstream/main --no-edit (resolve conflicts favoring our customizations)
-2. If conflicts, resolve them preserving our features listed above
-3. Run: npm install (update dependencies)
-4. Run: npm run build (verify it compiles)
-5. Run: npm run check (lint/format/typecheck)
-6. Run: ./test.sh (run tests)
-7. If all pass, bump the patch version: npm run version:patch
-8. Commit everything with a clear merge message
-9. Run: npm run publish (publish all packages to npm)
-10. git push origin main
-
-If the merge has complex conflicts you cannot resolve confidently, abort the merge (git merge --abort) and report what happened. Do not force through broken code.
+SAFETY:
+- If npm run build fails, try to fix the issue (max 2 attempts). If still failing, abort: git merge --abort && git checkout main
+- If tests fail due to our changes, fix them. If upstream tests are broken, skip npm publish but still push the merge.
+- If npm publish fails, log the error but don't fail the script (exit 0 still).
+- NEVER force push. NEVER rewrite history.
+- If >20 conflicting files, abort and log a summary.
 PROMPT
 
-echo "=== Sync completed at $(date) ==="
+EXIT_CODE=$?
+if [ $EXIT_CODE -ne 0 ]; then
+    echo "WARNING: Claude exited with code $EXIT_CODE"
+fi
 
-# Keep only last 30 logs
-ls -t "$LOG_DIR"/upstream-sync-*.log | tail -n +31 | xargs -r rm
+echo "=== Sync completed at $(date) (exit: $EXIT_CODE) ==="
+
+# keep only last 30 logs
+ls -t "$LOG_DIR"/upstream-sync-*.log 2>/dev/null | tail -n +31 | xargs -r rm

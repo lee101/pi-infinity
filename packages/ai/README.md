@@ -33,10 +33,11 @@ Unified LLM API with automatic model discovery, provider configuration, token an
 - [Cross-Provider Handoffs](#cross-provider-handoffs)
 - [Context Serialization](#context-serialization)
 - [Browser Usage](#browser-usage)
+  - [Browser Compatibility Notes](#browser-compatibility-notes)
   - [Environment Variables](#environment-variables-nodejs-only)
   - [Checking Environment Variables](#checking-environment-variables)
 - [OAuth Providers](#oauth-providers)
-  - [Vertex AI (ADC)](#vertex-ai-adc)
+  - [Vertex AI](#vertex-ai)
   - [CLI Login](#cli-login)
   - [Programmatic OAuth](#programmatic-oauth)
   - [Login Flow Example](#login-flow-example)
@@ -63,6 +64,8 @@ Unified LLM API with automatic model discovery, provider configuration, token an
 - **Google Gemini CLI** (requires OAuth, see below)
 - **Antigravity** (requires OAuth, see below)
 - **Amazon Bedrock**
+- **OpenCode Zen**
+- **OpenCode Go**
 - **Kimi For Coding** (Moonshot AI, uses Anthropic-compatible API)
 - **Any OpenAI-compatible API**: Ollama, vLLM, LM Studio, etc.
 
@@ -516,6 +519,8 @@ Every `AssistantMessage` includes a `stopReason` field that indicates how the ge
 - `"error"` - An error occurred during generation
 - `"aborted"` - Request was cancelled via abort signal
 
+`AssistantMessage` may also include `responseId`, a provider-specific upstream response or message identifier when the underlying API exposes one. Do not assume it is always present across providers.
+
 ## Error Handling
 
 When a request ends with an error (including aborts and tool call validation errors), the streaming API emits an error event:
@@ -624,6 +629,7 @@ The library uses a registry of API implementations. Built-in APIs include:
 - **`google-generative-ai`**: Google Generative AI API (`streamGoogle`, `GoogleOptions`)
 - **`google-gemini-cli`**: Google Cloud Code Assist API (`streamGoogleGeminiCli`, `GoogleGeminiCliOptions`)
 - **`google-vertex`**: Google Vertex AI API (`streamGoogleVertex`, `GoogleVertexOptions`)
+- **`mistral-conversations`**: Mistral Conversations API (`streamMistral`, `MistralOptions`)
 - **`openai-completions`**: OpenAI Chat Completions API (`streamOpenAICompletions`, `OpenAICompletionsOptions`)
 - **`openai-responses`**: OpenAI Responses API (`streamOpenAIResponses`, `OpenAIResponsesOptions`)
 - **`openai-codex-responses`**: OpenAI Codex Responses API (`streamOpenAICodexResponses`, `OpenAICodexResponsesOptions`)
@@ -636,7 +642,8 @@ A **provider** offers models through a specific API. For example:
 - **Anthropic** models use the `anthropic-messages` API
 - **Google** models use the `google-generative-ai` API
 - **OpenAI** models use the `openai-responses` API
-- **Mistral, xAI, Cerebras, Groq, etc.** models use the `openai-completions` API (OpenAI-compatible)
+- **Mistral** models use the `mistral-conversations` API
+- **xAI, Cerebras, Groq, etc.** models use the `openai-completions` API (OpenAI-compatible)
 
 ### Querying Providers and Models
 
@@ -724,9 +731,32 @@ const response = await stream(ollamaModel, context, {
 });
 ```
 
+Some OpenAI-compatible servers do not understand the `developer` role used for reasoning-capable models. For those providers, set `compat.supportsDeveloperRole` to `false` so the system prompt is sent as a `system` message instead. If the server also does not support `reasoning_effort`, set `compat.supportsReasoningEffort` to `false` too.
+
+This commonly applies to Ollama, vLLM, SGLang, and similar OpenAI-compatible servers. You can set `compat` at the provider level or per model.
+
+```typescript
+const ollamaReasoningModel: Model<'openai-completions'> = {
+  id: 'gpt-oss:20b',
+  name: 'GPT-OSS 20B (Ollama)',
+  api: 'openai-completions',
+  provider: 'ollama',
+  baseUrl: 'http://localhost:11434/v1',
+  reasoning: true,
+  input: ['text'],
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  contextWindow: 131072,
+  maxTokens: 32000,
+  compat: {
+    supportsDeveloperRole: false,
+    supportsReasoningEffort: false,
+  }
+};
+```
+
 ### OpenAI Compatibility Settings
 
-The `openai-completions` API is implemented by many providers with minor differences. By default, the library auto-detects compatibility settings based on `baseUrl` for known providers (Cerebras, xAI, Mistral, Chutes, etc.). For custom proxies or unknown endpoints, you can override these settings via the `compat` field. For `openai-responses` models, the compat field only supports Responses-specific flags.
+The `openai-completions` API is implemented by many providers with minor differences. By default, the library auto-detects compatibility settings based on `baseUrl` for a small set of known OpenAI-compatible providers (Cerebras, xAI, Chutes, DeepSeek, zAi, OpenCode, etc.). For custom proxies or unknown endpoints, you can override these settings via the `compat` field. For `openai-responses` models, the compat field only supports Responses-specific flags.
 
 ```typescript
 interface OpenAICompletionsCompat {
@@ -739,7 +769,6 @@ interface OpenAICompletionsCompat {
   requiresToolResultName?: boolean;  // Whether tool results require the `name` field (default: false)
   requiresAssistantAfterToolResult?: boolean; // Whether tool results must be followed by an assistant message (default: false)
   requiresThinkingAsText?: boolean;  // Whether thinking blocks must be converted to text (default: false)
-  requiresMistralToolIds?: boolean;  // Whether tool call IDs must be normalized to Mistral format (default: false)
   thinkingFormat?: 'openai' | 'zai' | 'qwen'; // Format for reasoning param: 'openai' uses reasoning_effort, 'zai' uses thinking: { type: "enabled" }, 'qwen' uses enable_thinking: boolean (default: openai)
   openRouterRouting?: OpenRouterRouting; // OpenRouter routing preferences (default: {})
   vercelGatewayRouting?: VercelGatewayRouting; // Vercel AI Gateway routing preferences (default: {})
@@ -886,6 +915,13 @@ const response = await complete(model, {
 
 > **Security Warning**: Exposing API keys in frontend code is dangerous. Anyone can extract and abuse your keys. Only use this approach for internal tools or demos. For production applications, use a backend proxy that keeps your API keys secure.
 
+### Browser Compatibility Notes
+
+- Amazon Bedrock (`bedrock-converse-stream`) is not supported in browser environments.
+- OAuth login flows are not supported in browser environments. Use the `@mariozechner/pi-ai/oauth` entry point in Node.js.
+- In browser builds, Bedrock can still appear in model lists. Calls to Bedrock models fail at runtime.
+- Use a server-side proxy or backend service if you need Bedrock or OAuth-based auth from a web app.
+
 ### Environment Variables (Node.js only)
 
 In Node.js environments, you can set environment variables to avoid passing API keys:
@@ -896,7 +932,7 @@ In Node.js environments, you can set environment variables to avoid passing API 
 | Azure OpenAI | `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_BASE_URL` or `AZURE_OPENAI_RESOURCE_NAME` (optional `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_DEPLOYMENT_NAME_MAP` like `model=deployment,model2=deployment2`) |
 | Anthropic | `ANTHROPIC_API_KEY` or `ANTHROPIC_OAUTH_TOKEN` |
 | Google | `GEMINI_API_KEY` |
-| Vertex AI | `GOOGLE_CLOUD_PROJECT` (or `GCLOUD_PROJECT`) + `GOOGLE_CLOUD_LOCATION` + ADC |
+| Vertex AI | `GOOGLE_CLOUD_API_KEY` or `GOOGLE_CLOUD_PROJECT` (or `GCLOUD_PROJECT`) + `GOOGLE_CLOUD_LOCATION` + ADC |
 | Mistral | `MISTRAL_API_KEY` |
 | Groq | `GROQ_API_KEY` |
 | Cerebras | `CEREBRAS_API_KEY` |
@@ -905,6 +941,7 @@ In Node.js environments, you can set environment variables to avoid passing API 
 | Vercel AI Gateway | `AI_GATEWAY_API_KEY` |
 | zAI | `ZAI_API_KEY` |
 | MiniMax | `MINIMAX_API_KEY` |
+| OpenCode Zen / OpenCode Go | `OPENCODE_API_KEY` |
 | Kimi For Coding | `KIMI_API_KEY` |
 | GitHub Copilot | `COPILOT_GITHUB_TOKEN` or `GH_TOKEN` or `GITHUB_TOKEN` |
 
@@ -963,14 +1000,15 @@ Several providers require OAuth authentication instead of static API keys:
 
 For paid Cloud Code Assist subscriptions, set `GOOGLE_CLOUD_PROJECT` or `GOOGLE_CLOUD_PROJECT_ID` to your project ID.
 
-### Vertex AI (ADC)
+### Vertex AI
 
-Vertex AI models use Application Default Credentials (ADC):
+Vertex AI models support either a Google Cloud API key or Application Default Credentials (ADC):
 
-- **Local development**: Run `gcloud auth application-default login`
-- **CI/Production**: Set `GOOGLE_APPLICATION_CREDENTIALS` to point to a service account JSON key file
+- **API key**: Set `GOOGLE_CLOUD_API_KEY` or pass `apiKey` in the call options.
+- **Local development (ADC)**: Run `gcloud auth application-default login`
+- **CI/Production (ADC)**: Set `GOOGLE_APPLICATION_CREDENTIALS` to point to a service account JSON key file
 
-Also set `GOOGLE_CLOUD_PROJECT` (or `GCLOUD_PROJECT`) and `GOOGLE_CLOUD_LOCATION`. You can also pass `project`/`location` in the call options.
+When using ADC, also set `GOOGLE_CLOUD_PROJECT` (or `GCLOUD_PROJECT`) and `GOOGLE_CLOUD_LOCATION`. You can also pass `project`/`location` in the call options. When using `GOOGLE_CLOUD_API_KEY`, `project` and `location` are not required.
 
 Example:
 
@@ -991,6 +1029,8 @@ import { getModel, complete } from '@mariozechner/pi-ai';
   const model = getModel('google-vertex', 'gemini-2.5-flash');
   const response = await complete(model, {
     messages: [{ role: 'user', content: 'Hello from Vertex AI' }]
+  }, {
+    apiKey: process.env.GOOGLE_CLOUD_API_KEY,
   });
 
   for (const block of response.content) {
@@ -1015,7 +1055,7 @@ Credentials are saved to `auth.json` in the current directory.
 
 ### Programmatic OAuth
 
-The library provides login and token refresh functions. Credential storage is the caller's responsibility.
+The library provides login and token refresh functions via the `@mariozechner/pi-ai/oauth` entry point. Credential storage is the caller's responsibility.
 
 ```typescript
 import {
@@ -1033,13 +1073,13 @@ import {
   // Types
   type OAuthProvider,  // 'anthropic' | 'openai-codex' | 'github-copilot' | 'google-gemini-cli' | 'google-antigravity'
   type OAuthCredentials,
-} from '@mariozechner/pi-ai';
+} from '@mariozechner/pi-ai/oauth';
 ```
 
 ### Login Flow Example
 
 ```typescript
-import { loginGitHubCopilot } from '@mariozechner/pi-ai';
+import { loginGitHubCopilot } from '@mariozechner/pi-ai/oauth';
 import { writeFileSync } from 'fs';
 
 const credentials = await loginGitHubCopilot({
@@ -1063,7 +1103,8 @@ writeFileSync('auth.json', JSON.stringify(auth, null, 2));
 Use `getOAuthApiKey()` to get an API key, automatically refreshing if expired:
 
 ```typescript
-import { getModel, complete, getOAuthApiKey } from '@mariozechner/pi-ai';
+import { getModel, complete } from '@mariozechner/pi-ai';
+import { getOAuthApiKey } from '@mariozechner/pi-ai/oauth';
 import { readFileSync, writeFileSync } from 'fs';
 
 // Load your stored credentials
@@ -1120,6 +1161,9 @@ Create a new provider file (for example `amazon-bedrock.ts`) that exports:
 #### 3. API Registry Integration (`src/providers/register-builtins.ts`)
 
 - Register the API with `registerApiProvider()`
+- Add a package subpath export in `package.json` for the provider module (`./dist/providers/<provider>.js`)
+- Add lazy loader wrappers in `src/providers/register-builtins.ts`, do not statically import provider implementation modules there
+- Add any root-level `export type` re-exports in `src/index.ts` that should remain available from `@mariozechner/pi-ai`
 - Add credential detection in `env-api-keys.ts` for the new provider
 - Ensure `streamSimple` handles auth lookup via `getEnvApiKey()` or provider-specific auth
 

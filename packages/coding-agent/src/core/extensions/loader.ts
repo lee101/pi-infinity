@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { createJiti } from "@mariozechner/jiti";
 import * as _bundledPiAgentCore from "@mariozechner/pi-agent-core";
 import * as _bundledPiAi from "@mariozechner/pi-ai";
+import * as _bundledPiAiOauth from "@mariozechner/pi-ai/oauth";
 import type { KeyId } from "@mariozechner/pi-tui";
 import * as _bundledPiTui from "@mariozechner/pi-tui";
 // Static imports of packages that extensions may use.
@@ -25,6 +26,7 @@ import * as _bundledPiCodingAgent from "../../index.js";
 import { createEventBus, type EventBus } from "../event-bus.js";
 import type { ExecOptions } from "../exec.js";
 import { execCommand } from "../exec.js";
+import { createSyntheticSourceInfo } from "../source-info.js";
 import type {
 	Extension,
 	ExtensionAPI,
@@ -43,6 +45,7 @@ const VIRTUAL_MODULES: Record<string, unknown> = {
 	"@mariozechner/pi-agent-core": _bundledPiAgentCore,
 	"@mariozechner/pi-tui": _bundledPiTui,
 	"@mariozechner/pi-ai": _bundledPiAi,
+	"@mariozechner/pi-ai/oauth": _bundledPiAiOauth,
 	"@mariozechner/pi-coding-agent": _bundledPiCodingAgent,
 };
 
@@ -60,13 +63,23 @@ function getAliases(): Record<string, string> {
 	const packageIndex = path.resolve(__dirname, "../..", "index.js");
 
 	const typeboxEntry = require.resolve("@sinclair/typebox");
-	const typeboxRoot = typeboxEntry.replace(/\/build\/cjs\/index\.js$/, "");
+	const typeboxRoot = typeboxEntry.replace(/[\\/]build[\\/]cjs[\\/]index\.js$/, "");
+
+	const packagesRoot = path.resolve(__dirname, "../../../../");
+	const resolveWorkspaceOrImport = (workspaceRelativePath: string, specifier: string): string => {
+		const workspacePath = path.join(packagesRoot, workspaceRelativePath);
+		if (fs.existsSync(workspacePath)) {
+			return workspacePath;
+		}
+		return fileURLToPath(import.meta.resolve(specifier));
+	};
 
 	_aliases = {
 		"@mariozechner/pi-coding-agent": packageIndex,
-		"@mariozechner/pi-agent-core": require.resolve("@mariozechner/pi-agent-core"),
-		"@mariozechner/pi-tui": require.resolve("@mariozechner/pi-tui"),
-		"@mariozechner/pi-ai": require.resolve("@mariozechner/pi-ai"),
+		"@mariozechner/pi-agent-core": resolveWorkspaceOrImport("agent/dist/index.js", "@mariozechner/pi-agent-core"),
+		"@mariozechner/pi-tui": resolveWorkspaceOrImport("tui/dist/index.js", "@mariozechner/pi-tui"),
+		"@mariozechner/pi-ai": resolveWorkspaceOrImport("ai/dist/index.js", "@mariozechner/pi-ai"),
+		"@mariozechner/pi-ai/oauth": resolveWorkspaceOrImport("ai/dist/oauth.js", "@mariozechner/pi-ai/oauth"),
 		"@sinclair/typebox": typeboxRoot,
 	};
 
@@ -109,7 +122,7 @@ export function createExtensionRuntime(): ExtensionRuntime {
 		throw new Error("Extension runtime not initialized. Action methods cannot be called during extension loading.");
 	};
 
-	return {
+	const runtime: ExtensionRuntime = {
 		sendMessage: notInitialized,
 		sendUserMessage: notInitialized,
 		appendEntry: notInitialized,
@@ -119,13 +132,25 @@ export function createExtensionRuntime(): ExtensionRuntime {
 		getActiveTools: notInitialized,
 		getAllTools: notInitialized,
 		setActiveTools: notInitialized,
+		// registerTool() is valid during extension load; refresh is only needed post-bind.
+		refreshTools: () => {},
 		getCommands: notInitialized,
 		setModel: () => Promise.reject(new Error("Extension runtime not initialized")),
 		getThinkingLevel: notInitialized,
 		setThinkingLevel: notInitialized,
 		flagValues: new Map(),
 		pendingProviderRegistrations: [],
+		// Pre-bind: queue registrations so bindCore() can flush them once the
+		// model registry is available. bindCore() replaces both with direct calls.
+		registerProvider: (name, config, extensionPath = "<unknown>") => {
+			runtime.pendingProviderRegistrations.push({ name, config, extensionPath });
+		},
+		unregisterProvider: (name) => {
+			runtime.pendingProviderRegistrations = runtime.pendingProviderRegistrations.filter((r) => r.name !== name);
+		},
 	};
+
+	return runtime;
 }
 
 /**
@@ -150,12 +175,17 @@ function createExtensionAPI(
 		registerTool(tool: ToolDefinition): void {
 			extension.tools.set(tool.name, {
 				definition: tool,
-				extensionPath: extension.path,
+				sourceInfo: extension.sourceInfo,
 			});
+			runtime.refreshTools();
 		},
 
-		registerCommand(name: string, options: Omit<RegisteredCommand, "name">): void {
-			extension.commands.set(name, { name, ...options });
+		registerCommand(name: string, options: Omit<RegisteredCommand, "name" | "sourceInfo">): void {
+			extension.commands.set(name, {
+				name,
+				sourceInfo: extension.sourceInfo,
+				...options,
+			});
 		},
 
 		registerShortcut(
@@ -173,7 +203,7 @@ function createExtensionAPI(
 			options: { description?: string; type: "boolean" | "string"; default?: boolean | string },
 		): void {
 			extension.flags.set(name, { name, extensionPath: extension.path, ...options });
-			if (options.default !== undefined) {
+			if (options.default !== undefined && !runtime.flagValues.has(name)) {
 				runtime.flagValues.set(name, options.default);
 			}
 		},
@@ -246,7 +276,11 @@ function createExtensionAPI(
 		},
 
 		registerProvider(name: string, config: ProviderConfig) {
-			runtime.pendingProviderRegistrations.push({ name, config });
+			runtime.registerProvider(name, config, extension.path);
+		},
+
+		unregisterProvider(name: string) {
+			runtime.unregisterProvider(name, extension.path);
 		},
 
 		events: eventBus,
@@ -273,9 +307,16 @@ async function loadExtensionModule(extensionPath: string) {
  * Create an Extension object with empty collections.
  */
 function createExtension(extensionPath: string, resolvedPath: string): Extension {
+	const source =
+		extensionPath.startsWith("<") && extensionPath.endsWith(">")
+			? extensionPath.slice(1, -1).split(":")[0] || "temporary"
+			: "local";
+	const baseDir = extensionPath.startsWith("<") ? undefined : path.dirname(resolvedPath);
+
 	return {
 		path: extensionPath,
 		resolvedPath,
+		sourceInfo: createSyntheticSourceInfo(extensionPath, { source, baseDir }),
 		handlers: new Map(),
 		tools: new Map(),
 		messageRenderers: new Map(),
@@ -486,13 +527,13 @@ export async function discoverAndLoadExtensions(
 		}
 	};
 
-	// 1. Global extensions: agentDir/extensions/
-	const globalExtDir = path.join(agentDir, "extensions");
-	addPaths(discoverExtensionsInDir(globalExtDir));
-
-	// 2. Project-local extensions: cwd/.pi/extensions/
+	// 1. Project-local extensions: cwd/.pi/extensions/
 	const localExtDir = path.join(cwd, ".pi", "extensions");
 	addPaths(discoverExtensionsInDir(localExtDir));
+
+	// 2. Global extensions: agentDir/extensions/
+	const globalExtDir = path.join(agentDir, "extensions");
+	addPaths(discoverExtensionsInDir(globalExtDir));
 
 	// 3. Explicitly configured paths
 	for (const p of configuredPaths) {

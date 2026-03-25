@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { registerOAuthProvider } from "@mariozechner/pi-ai";
+import { registerOAuthProvider } from "@mariozechner/pi-ai/oauth";
 import lockfile from "proper-lockfile";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.js";
@@ -30,13 +30,17 @@ describe("AuthStorage", () => {
 		writeFileSync(authJsonPath, JSON.stringify(data));
 	}
 
+	function toShPath(value: string): string {
+		return value.replace(/\\/g, "/").replace(/"/g, '\\"');
+	}
+
 	describe("API key resolution", () => {
 		test("literal API key is returned directly", async () => {
 			writeAuthJson({
 				anthropic: { type: "api_key", key: "sk-ant-literal-key" },
 			});
 
-			authStorage = new AuthStorage(authJsonPath);
+			authStorage = AuthStorage.create(authJsonPath);
 			const apiKey = await authStorage.getApiKey("anthropic");
 
 			expect(apiKey).toBe("sk-ant-literal-key");
@@ -47,7 +51,7 @@ describe("AuthStorage", () => {
 				anthropic: { type: "api_key", key: "!echo test-api-key-from-command" },
 			});
 
-			authStorage = new AuthStorage(authJsonPath);
+			authStorage = AuthStorage.create(authJsonPath);
 			const apiKey = await authStorage.getApiKey("anthropic");
 
 			expect(apiKey).toBe("test-api-key-from-command");
@@ -58,7 +62,7 @@ describe("AuthStorage", () => {
 				anthropic: { type: "api_key", key: "!echo '  spaced-key  '" },
 			});
 
-			authStorage = new AuthStorage(authJsonPath);
+			authStorage = AuthStorage.create(authJsonPath);
 			const apiKey = await authStorage.getApiKey("anthropic");
 
 			expect(apiKey).toBe("spaced-key");
@@ -69,7 +73,7 @@ describe("AuthStorage", () => {
 				anthropic: { type: "api_key", key: "!printf 'line1\\nline2'" },
 			});
 
-			authStorage = new AuthStorage(authJsonPath);
+			authStorage = AuthStorage.create(authJsonPath);
 			const apiKey = await authStorage.getApiKey("anthropic");
 
 			expect(apiKey).toBe("line1\nline2");
@@ -80,7 +84,7 @@ describe("AuthStorage", () => {
 				anthropic: { type: "api_key", key: "!exit 1" },
 			});
 
-			authStorage = new AuthStorage(authJsonPath);
+			authStorage = AuthStorage.create(authJsonPath);
 			const apiKey = await authStorage.getApiKey("anthropic");
 
 			expect(apiKey).toBeUndefined();
@@ -91,7 +95,7 @@ describe("AuthStorage", () => {
 				anthropic: { type: "api_key", key: "!nonexistent-command-12345" },
 			});
 
-			authStorage = new AuthStorage(authJsonPath);
+			authStorage = AuthStorage.create(authJsonPath);
 			const apiKey = await authStorage.getApiKey("anthropic");
 
 			expect(apiKey).toBeUndefined();
@@ -102,7 +106,7 @@ describe("AuthStorage", () => {
 				anthropic: { type: "api_key", key: "!printf ''" },
 			});
 
-			authStorage = new AuthStorage(authJsonPath);
+			authStorage = AuthStorage.create(authJsonPath);
 			const apiKey = await authStorage.getApiKey("anthropic");
 
 			expect(apiKey).toBeUndefined();
@@ -117,7 +121,7 @@ describe("AuthStorage", () => {
 					anthropic: { type: "api_key", key: "TEST_AUTH_API_KEY_12345" },
 				});
 
-				authStorage = new AuthStorage(authJsonPath);
+				authStorage = AuthStorage.create(authJsonPath);
 				const apiKey = await authStorage.getApiKey("anthropic");
 
 				expect(apiKey).toBe("env-api-key-value");
@@ -138,7 +142,7 @@ describe("AuthStorage", () => {
 				anthropic: { type: "api_key", key: "literal_api_key_value" },
 			});
 
-			authStorage = new AuthStorage(authJsonPath);
+			authStorage = AuthStorage.create(authJsonPath);
 			const apiKey = await authStorage.getApiKey("anthropic");
 
 			expect(apiKey).toBe("literal_api_key_value");
@@ -149,7 +153,7 @@ describe("AuthStorage", () => {
 				anthropic: { type: "api_key", key: "!echo 'hello world' | tr ' ' '-'" },
 			});
 
-			authStorage = new AuthStorage(authJsonPath);
+			authStorage = AuthStorage.create(authJsonPath);
 			const apiKey = await authStorage.getApiKey("anthropic");
 
 			expect(apiKey).toBe("hello-world");
@@ -161,12 +165,13 @@ describe("AuthStorage", () => {
 				const counterFile = join(tempDir, "counter");
 				writeFileSync(counterFile, "0");
 
-				const command = `!sh -c 'count=$(cat ${counterFile}); echo $((count + 1)) > ${counterFile}; echo "key-value"'`;
+				const counterPath = toShPath(counterFile);
+				const command = `!sh -c 'count=$(cat "${counterPath}"); echo $((count + 1)) > "${counterPath}"; echo "key-value"'`;
 				writeAuthJson({
 					anthropic: { type: "api_key", key: command },
 				});
 
-				authStorage = new AuthStorage(authJsonPath);
+				authStorage = AuthStorage.create(authJsonPath);
 
 				// Call multiple times
 				await authStorage.getApiKey("anthropic");
@@ -182,16 +187,17 @@ describe("AuthStorage", () => {
 				const counterFile = join(tempDir, "counter");
 				writeFileSync(counterFile, "0");
 
-				const command = `!sh -c 'count=$(cat ${counterFile}); echo $((count + 1)) > ${counterFile}; echo "key-value"'`;
+				const counterPath = toShPath(counterFile);
+				const command = `!sh -c 'count=$(cat "${counterPath}"); echo $((count + 1)) > "${counterPath}"; echo "key-value"'`;
 				writeAuthJson({
 					anthropic: { type: "api_key", key: command },
 				});
 
 				// Create multiple AuthStorage instances
-				const storage1 = new AuthStorage(authJsonPath);
+				const storage1 = AuthStorage.create(authJsonPath);
 				await storage1.getApiKey("anthropic");
 
-				const storage2 = new AuthStorage(authJsonPath);
+				const storage2 = AuthStorage.create(authJsonPath);
 				await storage2.getApiKey("anthropic");
 
 				// Command should still have only run once
@@ -203,12 +209,13 @@ describe("AuthStorage", () => {
 				const counterFile = join(tempDir, "counter");
 				writeFileSync(counterFile, "0");
 
-				const command = `!sh -c 'count=$(cat ${counterFile}); echo $((count + 1)) > ${counterFile}; echo "key-value"'`;
+				const counterPath = toShPath(counterFile);
+				const command = `!sh -c 'count=$(cat "${counterPath}"); echo $((count + 1)) > "${counterPath}"; echo "key-value"'`;
 				writeAuthJson({
 					anthropic: { type: "api_key", key: command },
 				});
 
-				authStorage = new AuthStorage(authJsonPath);
+				authStorage = AuthStorage.create(authJsonPath);
 				await authStorage.getApiKey("anthropic");
 
 				// Clear cache and call again
@@ -226,7 +233,7 @@ describe("AuthStorage", () => {
 					openai: { type: "api_key", key: "!echo key-openai" },
 				});
 
-				authStorage = new AuthStorage(authJsonPath);
+				authStorage = AuthStorage.create(authJsonPath);
 
 				const keyA = await authStorage.getApiKey("anthropic");
 				const keyB = await authStorage.getApiKey("openai");
@@ -239,12 +246,13 @@ describe("AuthStorage", () => {
 				const counterFile = join(tempDir, "counter");
 				writeFileSync(counterFile, "0");
 
-				const command = `!sh -c 'count=$(cat ${counterFile}); echo $((count + 1)) > ${counterFile}; exit 1'`;
+				const counterPath = toShPath(counterFile);
+				const command = `!sh -c 'count=$(cat "${counterPath}"); echo $((count + 1)) > "${counterPath}"; exit 1'`;
 				writeAuthJson({
 					anthropic: { type: "api_key", key: command },
 				});
 
-				authStorage = new AuthStorage(authJsonPath);
+				authStorage = AuthStorage.create(authJsonPath);
 
 				// Call multiple times - all should return undefined
 				const key1 = await authStorage.getApiKey("anthropic");
@@ -269,7 +277,7 @@ describe("AuthStorage", () => {
 						anthropic: { type: "api_key", key: envVarName },
 					});
 
-					authStorage = new AuthStorage(authJsonPath);
+					authStorage = AuthStorage.create(authJsonPath);
 
 					const key1 = await authStorage.getApiKey("anthropic");
 					expect(key1).toBe("first-value");
@@ -320,7 +328,7 @@ describe("AuthStorage", () => {
 				},
 			});
 
-			authStorage = new AuthStorage(authJsonPath);
+			authStorage = AuthStorage.create(authJsonPath);
 
 			const realLock = lockfile.lock.bind(lockfile);
 			const lockSpy = vi.spyOn(lockfile, "lock");
@@ -339,13 +347,97 @@ describe("AuthStorage", () => {
 		});
 	});
 
+	describe("persistence semantics", () => {
+		test("set preserves unrelated external edits", () => {
+			writeAuthJson({
+				anthropic: { type: "api_key", key: "old-anthropic" },
+				openai: { type: "api_key", key: "openai-key" },
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+
+			// Simulate external edit while process is running
+			writeAuthJson({
+				anthropic: { type: "api_key", key: "old-anthropic" },
+				openai: { type: "api_key", key: "openai-key" },
+				google: { type: "api_key", key: "google-key" },
+			});
+
+			authStorage.set("anthropic", { type: "api_key", key: "new-anthropic" });
+
+			const updated = JSON.parse(readFileSync(authJsonPath, "utf-8")) as Record<string, { key: string }>;
+			expect(updated.anthropic.key).toBe("new-anthropic");
+			expect(updated.openai.key).toBe("openai-key");
+			expect(updated.google.key).toBe("google-key");
+		});
+
+		test("remove preserves unrelated external edits", () => {
+			writeAuthJson({
+				anthropic: { type: "api_key", key: "anthropic-key" },
+				openai: { type: "api_key", key: "openai-key" },
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+
+			// Simulate external edit while process is running
+			writeAuthJson({
+				anthropic: { type: "api_key", key: "anthropic-key" },
+				openai: { type: "api_key", key: "openai-key" },
+				google: { type: "api_key", key: "google-key" },
+			});
+
+			authStorage.remove("anthropic");
+
+			const updated = JSON.parse(readFileSync(authJsonPath, "utf-8")) as Record<string, { key: string }>;
+			expect(updated.anthropic).toBeUndefined();
+			expect(updated.openai.key).toBe("openai-key");
+			expect(updated.google.key).toBe("google-key");
+		});
+
+		test("does not overwrite malformed auth file after load error", () => {
+			writeAuthJson({
+				anthropic: { type: "api_key", key: "anthropic-key" },
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+			writeFileSync(authJsonPath, "{invalid-json", "utf-8");
+
+			authStorage.reload();
+			authStorage.set("openai", { type: "api_key", key: "openai-key" });
+
+			const raw = readFileSync(authJsonPath, "utf-8");
+			expect(raw).toBe("{invalid-json");
+		});
+
+		test("reload records parse errors and drainErrors clears buffer", () => {
+			writeAuthJson({
+				anthropic: { type: "api_key", key: "anthropic-key" },
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+			writeFileSync(authJsonPath, "{invalid-json", "utf-8");
+
+			authStorage.reload();
+
+			// Keeps previous in-memory data on reload failure
+			expect(authStorage.get("anthropic")).toEqual({ type: "api_key", key: "anthropic-key" });
+
+			const firstDrain = authStorage.drainErrors();
+			expect(firstDrain.length).toBeGreaterThan(0);
+			expect(firstDrain[0]).toBeInstanceOf(Error);
+
+			const secondDrain = authStorage.drainErrors();
+			expect(secondDrain).toHaveLength(0);
+		});
+	});
+
 	describe("runtime overrides", () => {
 		test("runtime override takes priority over auth.json", async () => {
 			writeAuthJson({
 				anthropic: { type: "api_key", key: "!echo stored-key" },
 			});
 
-			authStorage = new AuthStorage(authJsonPath);
+			authStorage = AuthStorage.create(authJsonPath);
 			authStorage.setRuntimeApiKey("anthropic", "runtime-key");
 
 			const apiKey = await authStorage.getApiKey("anthropic");
@@ -358,7 +450,7 @@ describe("AuthStorage", () => {
 				anthropic: { type: "api_key", key: "!echo stored-key" },
 			});
 
-			authStorage = new AuthStorage(authJsonPath);
+			authStorage = AuthStorage.create(authJsonPath);
 			authStorage.setRuntimeApiKey("anthropic", "runtime-key");
 			authStorage.removeRuntimeApiKey("anthropic");
 

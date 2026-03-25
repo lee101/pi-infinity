@@ -6,10 +6,13 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Agent } from "@mariozechner/pi-agent-core";
-import { getModel, getOAuthApiKey, type OAuthCredentials, type OAuthProvider } from "@mariozechner/pi-ai";
+import { getModel, type OAuthCredentials, type OAuthProvider } from "@mariozechner/pi-ai";
+import { getOAuthApiKey } from "@mariozechner/pi-ai/oauth";
 import { AgentSession } from "../src/core/agent-session.js";
 import { AuthStorage } from "../src/core/auth-storage.js";
-import { createExtensionRuntime } from "../src/core/extensions/loader.js";
+import { createEventBus } from "../src/core/event-bus.js";
+import type { Extension, ExtensionFactory, LoadExtensionsResult } from "../src/core/extensions/index.js";
+import { createExtensionRuntime, loadExtensionFromFactory } from "../src/core/extensions/loader.js";
 import { ModelRegistry } from "../src/core/model-registry.js";
 import type { ResourceLoader } from "../src/core/resource-loader.js";
 import { SessionManager } from "../src/core/session-manager.js";
@@ -119,7 +122,7 @@ export const PI_AGENT_DIR = join(homedir(), ".pi", "agent");
  * Use this for tests that need real OAuth credentials.
  */
 export function getRealAuthStorage(): AuthStorage {
-	return new AuthStorage(AUTH_PATH);
+	return AuthStorage.create(AUTH_PATH);
 }
 
 /**
@@ -174,16 +177,52 @@ export interface TestSessionContext {
 	cleanup: () => void;
 }
 
-export function createTestResourceLoader(): ResourceLoader {
+export interface CreateTestExtensionsResultInput {
+	factory: ExtensionFactory;
+	path?: string;
+}
+
+export async function createTestExtensionsResult(
+	inputs: Array<ExtensionFactory | CreateTestExtensionsResultInput>,
+	cwd = process.cwd(),
+): Promise<LoadExtensionsResult> {
+	const runtime = createExtensionRuntime();
+	const eventBus = createEventBus();
+	const extensions: Extension[] = [];
+
+	for (const [index, input] of inputs.entries()) {
+		const factory = typeof input === "function" ? input : input.factory;
+		const extensionPath =
+			typeof input === "function" ? `<inline:${index + 1}>` : (input.path ?? `<inline:${index + 1}>`);
+		extensions.push(await loadExtensionFromFactory(factory, cwd, eventBus, runtime, extensionPath));
+	}
+
 	return {
-		getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
+		extensions,
+		errors: [],
+		runtime,
+	};
+}
+
+export interface CreateTestResourceLoaderOptions {
+	extensionsResult?: LoadExtensionsResult;
+}
+
+export function createTestResourceLoader(options: CreateTestResourceLoaderOptions = {}): ResourceLoader {
+	const extensionsResult = options.extensionsResult ?? {
+		extensions: [],
+		errors: [],
+		runtime: createExtensionRuntime(),
+	};
+
+	return {
+		getExtensions: () => extensionsResult,
 		getSkills: () => ({ skills: [], diagnostics: [] }),
 		getPrompts: () => ({ prompts: [], diagnostics: [] }),
 		getThemes: () => ({ themes: [], diagnostics: [] }),
 		getAgentsFiles: () => ({ agentsFiles: [] }),
 		getSystemPrompt: () => undefined,
 		getAppendSystemPrompt: () => [],
-		getPathMetadata: () => new Map(),
 		extendResources: () => {},
 		reload: async () => {},
 	};
@@ -214,7 +253,7 @@ export function createTestSession(options: TestSessionOptions = {}): TestSession
 		settingsManager.applyOverrides(options.settingsOverrides);
 	}
 
-	const authStorage = new AuthStorage(join(tempDir, "auth.json"));
+	const authStorage = AuthStorage.create(join(tempDir, "auth.json"));
 	const modelRegistry = new ModelRegistry(authStorage, tempDir);
 
 	const session = new AgentSession({
