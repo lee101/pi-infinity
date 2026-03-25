@@ -62,6 +62,7 @@ OUR CUSTOMIZATIONS (preserve ALL of these -- if a merge conflict touches these, 
 5. .pi/ and .pinf/ directories contain our custom settings
 6. AGENTS.md: keep our version if it differs from upstream
 7. scripts/daily-upstream-sync.sh: keep ours
+8. CLI flags: --auto-next-steps and --auto-next-idea in packages/coding-agent/src/cli/args.ts
 
 STEPS (execute in order):
 1. Run: git diff HEAD..upstream/main --stat (understand what changed)

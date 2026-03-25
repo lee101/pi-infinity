@@ -34,5 +34,6 @@ pi-*.html
 out.html
 packages/coding-agent/binaries/
 todo.md
+.pi
 .pinf
 plans/
