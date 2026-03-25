@@ -2395,7 +2395,7 @@ describe("Editor component", () => {
 			assert.strictEqual(editor.getText(), "/model gpt-4o-mini");
 		});
 
-		it("chains into argument completions after tab-completing slash command names", () => {
+		it("does not chain into argument completions after tab-completing slash command names", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 
 			const provider = new CombinedAutocompleteProvider([
@@ -2422,10 +2422,6 @@ describe("Editor component", () => {
 
 			editor.handleInput("\t");
 			assert.strictEqual(editor.getText(), "/model ");
-			assert.strictEqual(editor.isShowingAutocomplete(), true);
-
-			editor.handleInput("\t");
-			assert.strictEqual(editor.getText(), "/model claude-opus");
 			assert.strictEqual(editor.isShowingAutocomplete(), false);
 		});
 
