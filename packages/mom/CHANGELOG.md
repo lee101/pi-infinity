@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.63.1] - 2026-03-27
+
+### Fixed
+
+- Fixed Mom compaction status handling to follow the unified `compaction_start` and `compaction_end` session events, keeping compaction notifications working after the event rename ([#2617](https://github.com/badlogic/pi-mono/issues/2617))
+
+## [0.63.0] - 2026-03-27
+
 ## [0.62.0] - 2026-03-23
 
 ## [0.61.1] - 2026-03-20

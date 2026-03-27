@@ -914,44 +914,26 @@ async function generateModels() {
 		});
 	}
 
-	const minimaxDirectProviders = ["minimax", "minimax-cn"] as const;
-	const minimaxAnthropicIds = new Set([
-		"MiniMax-M2",
-		"MiniMax-M2.1",
-		"MiniMax-M2.1-highspeed",
-		"MiniMax-M2.5",
-		"MiniMax-M2.5-highspeed",
-		"MiniMax-M2.7",
-		"MiniMax-M2.7-highspeed",
-	]);
+	const minimaxDirectSupportedIds = new Set(["MiniMax-M2.7", "MiniMax-M2.7-highspeed"]);
 
 	for (const candidate of allModels) {
 		if (
 			(candidate.provider === "minimax" || candidate.provider === "minimax-cn") &&
-			minimaxAnthropicIds.has(candidate.id)
+			minimaxDirectSupportedIds.has(candidate.id)
 		) {
 			candidate.contextWindow = 204800;
 			candidate.maxTokens = 131072;
 		}
 	}
 
-	for (const provider of minimaxDirectProviders) {
-		const baseModel = allModels.find((m) => m.provider === provider && m.id === "MiniMax-M2.1");
-		if (!baseModel) continue;
-		if (allModels.some((m) => m.provider === provider && m.id === "MiniMax-M2.1-highspeed")) continue;
-
-		allModels.push({
-			...baseModel,
-			id: "MiniMax-M2.1-highspeed",
-			name: "MiniMax-M2.1-highspeed",
-			cost: {
-				...baseModel.cost,
-				input: baseModel.cost.input * 2,
-				output: baseModel.cost.output * 2,
-			},
-			contextWindow: 204800,
-			maxTokens: 131072,
-		});
+	for (let i = allModels.length - 1; i >= 0; i--) {
+		const candidate = allModels[i];
+		if (
+			(candidate.provider === "minimax" || candidate.provider === "minimax-cn") &&
+			!minimaxDirectSupportedIds.has(candidate.id)
+		) {
+			allModels.splice(i, 1);
+		}
 	}
 
 	// OpenAI Codex (ChatGPT OAuth) models
@@ -1329,6 +1311,18 @@ async function generateModels() {
 		{
 			id: "gemini-3.1-pro-preview",
 			name: "Gemini 3.1 Pro Preview (Vertex)",
+			api: "google-vertex",
+			provider: "google-vertex",
+			baseUrl: VERTEX_BASE_URL,
+			reasoning: true,
+			input: ["text", "image"],
+			cost: { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 0 },
+			contextWindow: 1048576,
+			maxTokens: 65536,
+		},
+		{
+			id: "gemini-3.1-pro-preview-customtools",
+			name: "Gemini 3.1 Pro Preview Custom Tools (Vertex)",
 			api: "google-vertex",
 			provider: "google-vertex",
 			baseUrl: VERTEX_BASE_URL,

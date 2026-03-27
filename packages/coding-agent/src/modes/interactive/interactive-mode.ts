@@ -48,7 +48,6 @@ import {
 	VERSION,
 } from "../../config.js";
 import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.js";
-import type { CompactionResult } from "../../core/compaction/index.js";
 import type {
 	ExtensionContext,
 	ExtensionRunner,
@@ -463,7 +462,11 @@ export class InteractiveMode {
 				hint("app.clipboard.pasteImage", "to paste image"),
 				rawKeyHint("drop files", "to attach"),
 			].join("\n");
-			this.builtInHeader = new Text(`${logo}\n${instructions}`, 1, 0);
+			const onboarding = theme.fg(
+				"dim",
+				`Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.`,
+			);
+			this.builtInHeader = new Text(`${logo}\n${instructions}\n\n${onboarding}`, 1, 0);
 
 			// Setup UI layout
 			this.headerContainer.addChild(new Spacer(1));
@@ -1287,10 +1290,8 @@ export class InteractiveMode {
 			compact: (options) => {
 				void (async () => {
 					try {
-						const result = await this.executeCompaction(options?.customInstructions, false);
-						if (result) {
-							options?.onComplete?.(result);
-						}
+						const result = await this.session.compact(options?.customInstructions);
+						options?.onComplete?.(result);
 					} catch (error) {
 						const err = error instanceof Error ? error : new Error(String(error));
 						options?.onError?.(err);
@@ -2395,58 +2396,63 @@ export class InteractiveMode {
 				this.ui.requestRender();
 				break;
 
-			case "auto_compaction_start": {
+			case "compaction_start": {
 				// Keep editor active; submissions are queued during compaction.
-				// Set up escape to abort auto-compaction
 				this.autoCompactionEscapeHandler = this.defaultEditor.onEscape;
 				this.defaultEditor.onEscape = () => {
 					this.session.abortCompaction();
 				};
-				// Show compacting indicator with reason
 				this.statusContainer.clear();
-				const reasonText = event.reason === "overflow" ? "Context overflow detected, " : "";
+				const cancelHint = `(${keyText("app.interrupt")} to cancel)`;
+				const label =
+					event.reason === "manual"
+						? `Compacting context... ${cancelHint}`
+						: `${event.reason === "overflow" ? "Context overflow detected, " : ""}Auto-compacting... ${cancelHint}`;
 				this.autoCompactionLoader = new Loader(
 					this.ui,
 					(spinner) => theme.fg("accent", spinner),
 					(text) => theme.fg("muted", text),
-					`${reasonText}Auto-compacting... (${keyText("app.interrupt")} to cancel)`,
+					label,
 				);
 				this.statusContainer.addChild(this.autoCompactionLoader);
 				this.ui.requestRender();
 				break;
 			}
 
-			case "auto_compaction_end": {
-				// Restore escape handler
+			case "compaction_end": {
 				if (this.autoCompactionEscapeHandler) {
 					this.defaultEditor.onEscape = this.autoCompactionEscapeHandler;
 					this.autoCompactionEscapeHandler = undefined;
 				}
-				// Stop loader
 				if (this.autoCompactionLoader) {
 					this.autoCompactionLoader.stop();
 					this.autoCompactionLoader = undefined;
 					this.statusContainer.clear();
 				}
-				// Handle result
 				if (event.aborted) {
-					this.showStatus("Auto-compaction cancelled");
+					if (event.reason === "manual") {
+						this.showError("Compaction cancelled");
+					} else {
+						this.showStatus("Auto-compaction cancelled");
+					}
 				} else if (event.result) {
-					// Rebuild chat to show compacted state
 					this.chatContainer.clear();
 					this.rebuildChatFromMessages();
-					// Add compaction component at bottom so user sees it without scrolling
-					this.addMessageToChat({
-						role: "compactionSummary",
-						tokensBefore: event.result.tokensBefore,
-						summary: event.result.summary,
-						timestamp: Date.now(),
-					});
+					this.addMessageToChat(
+						createCompactionSummaryMessage(
+							event.result.summary,
+							event.result.tokensBefore,
+							new Date().toISOString(),
+						),
+					);
 					this.footer.invalidate();
 				} else if (event.errorMessage) {
-					// Compaction failed (e.g., quota exceeded, API error)
-					this.chatContainer.addChild(new Spacer(1));
-					this.chatContainer.addChild(new Text(theme.fg("error", event.errorMessage), 1, 0));
+					if (event.reason === "manual") {
+						this.showError(event.errorMessage);
+					} else {
+						this.chatContainer.addChild(new Spacer(1));
+						this.chatContainer.addChild(new Text(theme.fg("error", event.errorMessage), 1, 0));
+					}
 				}
 				void this.flushCompactionQueue({ willRetry: event.willRetry });
 				this.ui.requestRender();
@@ -4570,63 +4576,17 @@ export class InteractiveMode {
 			return;
 		}
 
-		await this.executeCompaction(customInstructions, false);
-	}
-
-	private async executeCompaction(customInstructions?: string, isAuto = false): Promise<CompactionResult | undefined> {
-		// Stop loading animation
 		if (this.loadingAnimation) {
 			this.loadingAnimation.stop();
 			this.loadingAnimation = undefined;
 		}
 		this.statusContainer.clear();
 
-		// Set up escape handler during compaction
-		const originalOnEscape = this.defaultEditor.onEscape;
-		this.defaultEditor.onEscape = () => {
-			this.session.abortCompaction();
-		};
-
-		// Show compacting status
-		this.chatContainer.addChild(new Spacer(1));
-		const cancelHint = `(${keyText("app.interrupt")} to cancel)`;
-		const label = isAuto ? `Auto-compacting context... ${cancelHint}` : `Compacting context... ${cancelHint}`;
-		const compactingLoader = new Loader(
-			this.ui,
-			(spinner) => theme.fg("accent", spinner),
-			(text) => theme.fg("muted", text),
-			label,
-		);
-		this.statusContainer.addChild(compactingLoader);
-		this.ui.requestRender();
-
-		let result: CompactionResult | undefined;
-
 		try {
-			result = await this.session.compact(customInstructions);
-
-			// Rebuild UI
-			this.rebuildChatFromMessages();
-
-			// Add compaction component at bottom so user sees it without scrolling
-			const msg = createCompactionSummaryMessage(result.summary, result.tokensBefore, new Date().toISOString());
-			this.addMessageToChat(msg);
-
-			this.footer.invalidate();
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			if (message === "Compaction cancelled" || (error instanceof Error && error.name === "AbortError")) {
-				this.showError("Compaction cancelled");
-			} else {
-				this.showError(`Compaction failed: ${message}`);
-			}
-		} finally {
-			compactingLoader.stop();
-			this.statusContainer.clear();
-			this.defaultEditor.onEscape = originalOnEscape;
+			await this.session.compact(customInstructions);
+		} catch {
+			// Ignore, will be emitted as an event
 		}
-		void this.flushCompactionQueue({ willRetry: false });
-		return result;
 	}
 
 	stop(): void {

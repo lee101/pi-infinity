@@ -158,7 +158,7 @@ describe("Coding Agent Tools", () => {
 
 		it("should detect image MIME type from file magic (not extension)", async () => {
 			const png1x1Base64 =
-				"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+X2Z0AAAAASUVORK5CYII=";
+				"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==";
 			const pngBuffer = Buffer.from(png1x1Base64, "base64");
 
 			const testFile = join(testDir, "image.txt");
@@ -257,6 +257,121 @@ describe("Coding Agent Tools", () => {
 					newText: "bar",
 				}),
 			).rejects.toThrow(/Found 3 occurrences/);
+		});
+
+		it("should replace multiple disjoint regions in one call", async () => {
+			const testFile = join(testDir, "edit-multi.txt");
+			writeFileSync(testFile, "alpha\nbeta\ngamma\ndelta\n");
+
+			const result = await editTool.execute("test-call-8", {
+				path: testFile,
+				edits: [
+					{ oldText: "alpha\n", newText: "ALPHA\n" },
+					{ oldText: "gamma\n", newText: "GAMMA\n" },
+				],
+			});
+
+			expect(getTextOutput(result)).toContain("Successfully replaced 2 block(s)");
+			expect(readFileSync(testFile, "utf-8")).toBe("ALPHA\nbeta\nGAMMA\ndelta\n");
+			expect(result.details?.diff).toContain("ALPHA");
+			expect(result.details?.diff).toContain("GAMMA");
+		});
+
+		it("should collapse large unchanged gaps in multi-edit diffs", async () => {
+			const testFile = join(testDir, "edit-multi-large-gap.txt");
+			const lines = Array.from({ length: 600 }, (_, i) => `line ${String(i + 1).padStart(3, "0")}`);
+			writeFileSync(testFile, `${lines.join("\n")}\n`);
+
+			const result = await editTool.execute("test-call-8b", {
+				path: testFile,
+				edits: [
+					{ oldText: "line 100\n", newText: "LINE 100\n" },
+					{ oldText: "line 300\n", newText: "LINE 300\n" },
+					{ oldText: "line 500\n", newText: "LINE 500\n" },
+				],
+			});
+
+			const diff = result.details?.diff ?? "";
+			expect(diff).toContain("LINE 100");
+			expect(diff).toContain("LINE 300");
+			expect(diff).toContain("LINE 500");
+			expect(diff).toContain("...");
+			expect(diff).not.toContain("line 250");
+			expect(diff.split("\n").length).toBeLessThan(50);
+		});
+
+		it("should match edits against the original file, not incrementally", async () => {
+			const testFile = join(testDir, "edit-multi-original.txt");
+			writeFileSync(testFile, "foo\nbar\nbaz\n");
+
+			await editTool.execute("test-call-9", {
+				path: testFile,
+				edits: [
+					{ oldText: "foo\n", newText: "foo bar\n" },
+					{ oldText: "bar\n", newText: "BAR\n" },
+				],
+			});
+
+			expect(readFileSync(testFile, "utf-8")).toBe("foo bar\nBAR\nbaz\n");
+		});
+
+		it("should fail when mixing single-edit mode with edits mode", async () => {
+			const testFile = join(testDir, "edit-invalid-mixed.txt");
+			writeFileSync(testFile, "hello\nworld\n");
+
+			await expect(
+				editTool.execute("test-call-10", {
+					path: testFile,
+					oldText: "hello\n",
+					newText: "HELLO\n",
+					edits: [{ oldText: "world\n", newText: "WORLD\n" }],
+				}),
+			).rejects.toThrow(/Use either/);
+		});
+
+		it("should fail when edits is empty", async () => {
+			const testFile = join(testDir, "edit-empty-edits.txt");
+			writeFileSync(testFile, "hello\nworld\n");
+
+			await expect(
+				editTool.execute("test-call-11", {
+					path: testFile,
+					edits: [],
+				}),
+			).rejects.toThrow(/edits must contain at least one replacement/);
+		});
+
+		it("should fail when multi-edit regions overlap", async () => {
+			const testFile = join(testDir, "edit-overlap.txt");
+			writeFileSync(testFile, "one\ntwo\nthree\n");
+
+			await expect(
+				editTool.execute("test-call-12", {
+					path: testFile,
+					edits: [
+						{ oldText: "one\ntwo\n", newText: "ONE\nTWO\n" },
+						{ oldText: "two\nthree\n", newText: "TWO\nTHREE\n" },
+					],
+				}),
+			).rejects.toThrow(/overlap/);
+		});
+
+		it("should not partially apply edits when one edit fails", async () => {
+			const testFile = join(testDir, "edit-no-partial.txt");
+			const originalContent = "alpha\nbeta\ngamma\n";
+			writeFileSync(testFile, originalContent);
+
+			await expect(
+				editTool.execute("test-call-13", {
+					path: testFile,
+					edits: [
+						{ oldText: "alpha\n", newText: "ALPHA\n" },
+						{ oldText: "missing\n", newText: "MISSING\n" },
+					],
+				}),
+			).rejects.toThrow(/Could not find/);
+
+			expect(readFileSync(testFile, "utf-8")).toBe(originalContent);
 		});
 	});
 
@@ -603,6 +718,21 @@ describe("edit tool fuzzy matching", () => {
 			}),
 		).rejects.toThrow(/Found 2 occurrences/);
 	});
+
+	it("should support fuzzy matching in multi-edit mode", async () => {
+		const testFile = join(testDir, "fuzzy-multi.txt");
+		writeFileSync(testFile, "console.log(\u2018hello\u2019);\nhello\u00A0world\n");
+
+		await editTool.execute("test-fuzzy-9", {
+			path: testFile,
+			edits: [
+				{ oldText: "console.log('hello');\n", newText: "console.log('world');\n" },
+				{ oldText: "hello world\n", newText: "hello universe\n" },
+			],
+		});
+
+		expect(readFileSync(testFile, "utf-8")).toBe("console.log('world');\nhello universe\n");
+	});
 });
 
 describe("edit tool CRLF handling", () => {
@@ -685,5 +815,21 @@ describe("edit tool CRLF handling", () => {
 
 		const content = readFileSync(testFile, "utf-8");
 		expect(content).toBe("\uFEFFfirst\r\nREPLACED\r\nthird\r\n");
+	});
+
+	it("should preserve CRLF line endings and BOM in multi-edit mode", async () => {
+		const testFile = join(testDir, "bom-crlf-multi.txt");
+		writeFileSync(testFile, "\uFEFFfirst\r\nsecond\r\nthird\r\nfourth\r\n");
+
+		await editTool.execute("test-crlf-multi", {
+			path: testFile,
+			edits: [
+				{ oldText: "second\n", newText: "SECOND\n" },
+				{ oldText: "fourth\n", newText: "FOURTH\n" },
+			],
+		});
+
+		const content = readFileSync(testFile, "utf-8");
+		expect(content).toBe("\uFEFFfirst\r\nSECOND\r\nthird\r\nFOURTH\r\n");
 	});
 });

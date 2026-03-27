@@ -2,9 +2,26 @@
 
 ## [Unreleased]
 
+## [0.63.1] - 2026-03-27
+
+### Added
+
+- Added `gemini-3.1-pro-preview-customtools` model support for the `google-vertex` provider ([#2610](https://github.com/badlogic/pi-mono/pull/2610) by [@gordonhwc](https://github.com/gordonhwc))
+
+### Fixed
+
+- Fixed context overflow detection to recognize Ollama error responses like `prompt too long; exceeded max context length ...`, so callers can trigger compaction and retry instead of surfacing the raw overflow error ([#2626](https://github.com/badlogic/pi-mono/issues/2626))
+
+## [0.63.0] - 2026-03-27
+
+### Breaking Changes
+
+- Removed deprecated direct `minimax` and `minimax-cn` model IDs, keeping only `MiniMax-M2.7` and `MiniMax-M2.7-highspeed`. Update pinned model IDs to one of those supported direct MiniMax models, or use another provider route that still exposes the older IDs ([#2596](https://github.com/badlogic/pi-mono/pull/2596) by [@liyuan97](https://github.com/liyuan97))
+
 ### Fixed
 
 - Fixed GitHub Copilot OpenAI Responses requests to omit the `reasoning` field entirely when no reasoning effort is requested, avoiding `400` errors from Copilot `gpt-5-mini` rejecting `reasoning: { effort: "none" }` during internal summary calls ([#2567](https://github.com/badlogic/pi-mono/issues/2567))
+- Fixed Google and Vertex cost calculation to subtract cached prompt tokens from billable input tokens instead of double-counting them when providers report `cachedContentTokenCount` ([#2588](https://github.com/badlogic/pi-mono/pull/2588) by [@sparkleMing](https://github.com/sparkleMing))
 
 ## [0.62.0] - 2026-03-23
 
