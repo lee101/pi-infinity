@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed TUI cell size response handling to consume only exact `CSI 6 ; height ; width t` replies, so bare `Escape` is no longer swallowed while waiting for terminal image metadata ([#2661](https://github.com/badlogic/pi-mono/issues/2661))
+
+## [0.63.2] - 2026-03-29
+
 ## [0.63.1] - 2026-03-27
 
 ## [0.63.0] - 2026-03-27
