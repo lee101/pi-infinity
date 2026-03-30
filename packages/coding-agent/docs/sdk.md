@@ -20,7 +20,7 @@ import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from "
 
 // Set up credential storage and model registry
 const authStorage = AuthStorage.create();
-const modelRegistry = new ModelRegistry(authStorage);
+const modelRegistry = ModelRegistry.create(authStorage);
 
 const { session } = await createAgentSession({
   sessionManager: SessionManager.inMemory(),
@@ -171,10 +171,15 @@ const state = session.agent.state;
 // state.model: Model - current model
 // state.thinkingLevel: ThinkingLevel - current thinking level
 // state.systemPrompt: string - system prompt
-// state.tools: Tool[] - available tools
+// state.tools: AgentTool[] - available tools
+// state.streamingMessage?: AgentMessage - current partial assistant message
+// state.errorMessage?: string - latest assistant error
 
-// Replace messages (useful for branching, restoration)
-session.agent.replaceMessages(messages);
+// Replace messages (useful for branching or restoration)
+session.agent.state.messages = messages; // copies the top-level array
+
+// Replace tools
+session.agent.state.tools = tools; // copies the top-level array
 
 // Wait for agent to finish processing
 await session.agent.waitForIdle();
@@ -232,9 +237,12 @@ session.subscribe((event) => {
       // event.toolResults: tool results from this turn
       break;
     
-    // Session events (auto-compaction, retry)
-    case "auto_compaction_start":
-    case "auto_compaction_end":
+    // Session events (queue, compaction, retry)
+    case "queue_update":
+      console.log(event.steering, event.followUp);
+      break;
+    case "compaction_start":
+    case "compaction_end":
     case "auto_retry_start":
     case "auto_retry_end":
       break;
@@ -286,7 +294,7 @@ import { getModel } from "@mariozechner/pi-ai";
 import { AuthStorage, ModelRegistry } from "@mariozechner/pi-coding-agent";
 
 const authStorage = AuthStorage.create();
-const modelRegistry = new ModelRegistry(authStorage);
+const modelRegistry = ModelRegistry.create(authStorage);
 
 // Find specific built-in model (doesn't check if API key exists)
 const opus = getModel("anthropic", "claude-opus-4-5");
@@ -334,7 +342,7 @@ import { AuthStorage, ModelRegistry } from "@mariozechner/pi-coding-agent";
 
 // Default: uses ~/.pi/agent/auth.json and ~/.pi/agent/models.json
 const authStorage = AuthStorage.create();
-const modelRegistry = new ModelRegistry(authStorage);
+const modelRegistry = ModelRegistry.create(authStorage);
 
 const { session } = await createAgentSession({
   sessionManager: SessionManager.inMemory(),
@@ -347,7 +355,7 @@ authStorage.setRuntimeApiKey("anthropic", "sk-my-temp-key");
 
 // Custom auth storage location
 const customAuth = AuthStorage.create("/my/app/auth.json");
-const customRegistry = new ModelRegistry(customAuth, "/my/app/models.json");
+const customRegistry = ModelRegistry.create(customAuth, "/my/app/models.json");
 
 const { session } = await createAgentSession({
   sessionManager: SessionManager.inMemory(),
@@ -356,7 +364,7 @@ const { session } = await createAgentSession({
 });
 
 // No custom models.json (built-in models only)
-const simpleRegistry = new ModelRegistry(authStorage);
+const simpleRegistry = ModelRegistry.inMemory(authStorage);
 ```
 
 > See [examples/sdk/09-api-keys-and-oauth.ts](../examples/sdk/09-api-keys-and-oauth.ts)
@@ -785,7 +793,7 @@ if (process.env.MY_KEY) {
 }
 
 // Model registry (no custom models.json)
-const modelRegistry = new ModelRegistry(authStorage);
+const modelRegistry = ModelRegistry.create(authStorage);
 
 // Inline tool
 const statusTool: ToolDefinition = {

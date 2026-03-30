@@ -66,7 +66,7 @@ function createSession() {
 		sessionManager,
 		settingsManager,
 		cwd: process.cwd(),
-		modelRegistry: new ModelRegistry(authStorage, undefined),
+		modelRegistry: ModelRegistry.inMemory(authStorage),
 		resourceLoader: createTestResourceLoader(),
 	});
 
@@ -74,7 +74,7 @@ function createSession() {
 }
 
 function syncAgentMessages(session: AgentSession, sessionManager: SessionManager): void {
-	session.agent.replaceMessages(sessionManager.buildSessionContext().messages);
+	session.agent.state.messages = sessionManager.buildSessionContext().messages;
 }
 
 describe("AgentSession.getSessionStats", () => {
