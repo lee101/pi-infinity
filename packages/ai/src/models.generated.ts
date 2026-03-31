@@ -6565,6 +6565,23 @@ export const MODELS = {
 			contextWindow: 1000000,
 			maxTokens: 128000,
 		} satisfies Model<"openai-completions">,
+		"qwen3.6-plus-free": {
+			id: "qwen3.6-plus-free",
+			name: "Qwen3.6 Plus Free",
+			api: "openai-completions",
+			provider: "opencode",
+			baseUrl: "https://opencode.ai/zen/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+			},
+			contextWindow: 1048576,
+			maxTokens: 64000,
+		} satisfies Model<"openai-completions">,
 	},
 	"opencode-go": {
 		"glm-5": {
@@ -7623,23 +7640,6 @@ export const MODELS = {
 			contextWindow: 128000,
 			maxTokens: 32000,
 		} satisfies Model<"openai-completions">,
-		"kwaipilot/kat-coder-pro": {
-			id: "kwaipilot/kat-coder-pro",
-			name: "Kwaipilot: KAT-Coder-Pro V1",
-			api: "openai-completions",
-			provider: "openrouter",
-			baseUrl: "https://openrouter.ai/api/v1",
-			reasoning: false,
-			input: ["text"],
-			cost: {
-				input: 0.207,
-				output: 0.828,
-				cacheRead: 0.0414,
-				cacheWrite: 0,
-			},
-			contextWindow: 256000,
-			maxTokens: 128000,
-		} satisfies Model<"openai-completions">,
 		"kwaipilot/kat-coder-pro-v2": {
 			id: "kwaipilot/kat-coder-pro-v2",
 			name: "Kwaipilot: KAT-Coder-Pro V2",
@@ -7853,13 +7853,13 @@ export const MODELS = {
 			reasoning: true,
 			input: ["text"],
 			cost: {
-				input: 0.19,
-				output: 1.15,
-				cacheRead: 0.095,
+				input: 0.1755,
+				output: 1.125,
+				cacheRead: 0.09,
 				cacheWrite: 0,
 			},
-			contextWindow: 196608,
-			maxTokens: 65536,
+			contextWindow: 196600,
+			maxTokens: 196600,
 		} satisfies Model<"openai-completions">,
 		"minimax/minimax-m2.5:free": {
 			id: "minimax/minimax-m2.5:free",
@@ -10218,6 +10218,23 @@ export const MODELS = {
 			cost: {
 				input: 0.26,
 				output: 1.56,
+				cacheRead: 0,
+				cacheWrite: 0,
+			},
+			contextWindow: 1000000,
+			maxTokens: 65536,
+		} satisfies Model<"openai-completions">,
+		"qwen/qwen3.6-plus-preview:free": {
+			id: "qwen/qwen3.6-plus-preview:free",
+			name: "Qwen: Qwen3.6 Plus Preview (free)",
+			api: "openai-completions",
+			provider: "openrouter",
+			baseUrl: "https://openrouter.ai/api/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: {
+				input: 0,
+				output: 0,
 				cacheRead: 0,
 				cacheWrite: 0,
 			},
@@ -13878,7 +13895,7 @@ export const MODELS = {
 			api: "openai-completions",
 			provider: "zai",
 			baseUrl: "https://api.z.ai/api/coding/paas/v4",
-			compat: {"supportsDeveloperRole":false,"thinkingFormat":"zai"},
+			compat: {"supportsDeveloperRole":false,"thinkingFormat":"zai","zaiToolStream":true},
 			reasoning: true,
 			input: ["text"],
 			cost: {
@@ -13896,7 +13913,7 @@ export const MODELS = {
 			api: "openai-completions",
 			provider: "zai",
 			baseUrl: "https://api.z.ai/api/coding/paas/v4",
-			compat: {"supportsDeveloperRole":false,"thinkingFormat":"zai"},
+			compat: {"supportsDeveloperRole":false,"thinkingFormat":"zai","zaiToolStream":true},
 			reasoning: true,
 			input: ["text", "image"],
 			cost: {
@@ -13914,7 +13931,7 @@ export const MODELS = {
 			api: "openai-completions",
 			provider: "zai",
 			baseUrl: "https://api.z.ai/api/coding/paas/v4",
-			compat: {"supportsDeveloperRole":false,"thinkingFormat":"zai"},
+			compat: {"supportsDeveloperRole":false,"thinkingFormat":"zai","zaiToolStream":true},
 			reasoning: true,
 			input: ["text"],
 			cost: {
@@ -13932,7 +13949,7 @@ export const MODELS = {
 			api: "openai-completions",
 			provider: "zai",
 			baseUrl: "https://api.z.ai/api/coding/paas/v4",
-			compat: {"supportsDeveloperRole":false,"thinkingFormat":"zai"},
+			compat: {"supportsDeveloperRole":false,"thinkingFormat":"zai","zaiToolStream":true},
 			reasoning: true,
 			input: ["text"],
 			cost: {
@@ -13950,7 +13967,7 @@ export const MODELS = {
 			api: "openai-completions",
 			provider: "zai",
 			baseUrl: "https://api.z.ai/api/coding/paas/v4",
-			compat: {"supportsDeveloperRole":false,"thinkingFormat":"zai"},
+			compat: {"supportsDeveloperRole":false,"thinkingFormat":"zai","zaiToolStream":true},
 			reasoning: true,
 			input: ["text"],
 			cost: {
@@ -13968,7 +13985,7 @@ export const MODELS = {
 			api: "openai-completions",
 			provider: "zai",
 			baseUrl: "https://api.z.ai/api/coding/paas/v4",
-			compat: {"supportsDeveloperRole":false,"thinkingFormat":"zai"},
+			compat: {"supportsDeveloperRole":false,"thinkingFormat":"zai","zaiToolStream":true},
 			reasoning: true,
 			input: ["text"],
 			cost: {
@@ -13986,7 +14003,7 @@ export const MODELS = {
 			api: "openai-completions",
 			provider: "zai",
 			baseUrl: "https://api.z.ai/api/coding/paas/v4",
-			compat: {"supportsDeveloperRole":false,"thinkingFormat":"zai"},
+			compat: {"supportsDeveloperRole":false,"thinkingFormat":"zai","zaiToolStream":true},
 			reasoning: true,
 			input: ["text"],
 			cost: {

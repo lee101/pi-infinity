@@ -2,9 +2,82 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Removed extension post-transition events `session_switch` and `session_fork`. Extensions should now use `session_start` and inspect `event.reason`, which is now one of `"startup" | "reload" | "new" | "resume" | "fork"`. For `"new"`, `"resume"`, and `"fork"`, `session_start` also includes `previousSessionFile`. This is better because session replacement now fully reloads extensions, so one post-start hook with explicit reason matches the real lifecycle better than two extra non-cancellable post-transition events.
+- Removed session-replacement methods from `AgentSession`. Use `AgentSessionRuntimeHost` for `newSession()`, `switchSession()`, `fork()`, and `importFromJsonl()`. This is better because cross-cwd session replacement rebuilds cwd-bound runtime state and can replace the live `AgentSession` instance entirely. Keeping those operations on a stable runtime host matches the real lifecycle and avoids pretending one `AgentSession` mutates into another.
+
+#### Migration Notes
+
+For existing extensions:
+
+Before:
+
+```ts
+pi.on("session_switch", async (event, ctx) => {
+  if (event.reason === "new") {
+    resetState();
+  }
+});
+
+pi.on("session_fork", async (_event, ctx) => {
+  reconstructState(ctx);
+});
+```
+
+After:
+
+```ts
+pi.on("session_start", async (event, ctx) => {
+  if (event.reason === "new") {
+    resetState();
+  }
+
+  if (event.reason === "fork" || event.reason === "resume" || event.reason === "startup") {
+    reconstructState(ctx);
+  }
+});
+```
+
+For existing SDK integrations:
+
+Before:
+
+```ts
+await session.newSession();
+await session.switchSession("/path/to/session.jsonl");
+await session.fork("entry-id");
+await session.importFromJsonl(jsonl);
+```
+
+After:
+
+```ts
+const runtime = await createAgentSessionRuntime(bootstrap, {
+  cwd: process.cwd(),
+  sessionManager: SessionManager.create(process.cwd()),
+});
+const runtimeHost = new AgentSessionRuntimeHost(bootstrap, runtime);
+
+await runtimeHost.newSession();
+await runtimeHost.switchSession("/path/to/session.jsonl");
+await runtimeHost.fork("entry-id");
+await runtimeHost.importFromJsonl(jsonl);
+
+const session = runtimeHost.session;
+```
+
+After runtime replacement, use `runtimeHost.session` as the new live session and rebind any session-local subscriptions or extension bindings.
+
 ### Added
 
+- Added public SDK runtime-host exports `createAgentSessionRuntime()` and `AgentSessionRuntimeHost` for apps that need runtime-backed session replacement and mode-style session switching
+
 - Added label timestamps to the session tree with a `Shift+T` toggle in `/tree`, smart date formatting, and timestamp preservation through branching ([#2691](https://github.com/badlogic/pi-mono/pull/2691) by [@w-winter](https://github.com/w-winter))
+
+### Fixed
+
+- Fixed theme `export` colors to resolve theme variables the same way as `colors`, so `/export` HTML backgrounds now honor entries like `pageBg: "base"` instead of requiring inline hex values ([#2707](https://github.com/badlogic/pi-mono/issues/2707))
 
 ## [0.64.0] - 2026-03-29
 
