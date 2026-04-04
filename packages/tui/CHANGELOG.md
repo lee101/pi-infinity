@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.65.0] - 2026-04-03
+
 ### Fixed
 
 - Fixed markdown H1 headings ending with inline code from leaking underline styling into trailing line padding
