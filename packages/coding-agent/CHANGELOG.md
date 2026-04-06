@@ -2,11 +2,21 @@
 
 ## [Unreleased]
 
+## [0.65.2] - 2026-04-06
+
+## [0.65.1] - 2026-04-05
+
 ### Fixed
 
+- Fixed bash output truncation by line count to always persist full output to a temp file, preventing data loss when output exceeds 2000 lines but stays under the byte threshold ([#2852](https://github.com/badlogic/pi-mono/issues/2852))
 - RpcClient now forwards subprocess stderr to parent process in real-time ([#2805](https://github.com/badlogic/pi-mono/issues/2805))
 - Theme file watcher now handles async `fs.watch` error events instead of crashing the process ([#2791](https://github.com/badlogic/pi-mono/issues/2791))
+- Fixed stored session cwd handling so resuming or importing a session whose original working directory no longer exists now prompts interactive users to continue in the current cwd, while non-interactive modes fail with a clear error.
+- Fixed resource collision precedence so project and user skills, prompt templates, and themes override package resources consistently, and CLI-provided paths take precedence over discovered resources ([#2781](https://github.com/badlogic/pi-mono/issues/2781))
+- Fixed OpenAI-compatible completions streaming usage accounting to preserve `prompt_tokens_details.cache_write_tokens` and normalize OpenRouter `cached_tokens`, preventing incorrect cache read/write token and cost reporting in pi ([#2802](https://github.com/badlogic/pi-mono/issues/2802))
 - Fixed CLI extension paths like `git:gist.github.com/...` being incorrectly resolved against cwd instead of being passed through to the package manager ([#2845](https://github.com/badlogic/pi-mono/pull/2845) by [@aliou](https://github.com/aliou))
+- Fixed piped stdin runs with `--mode json` to preserve JSONL output instead of falling back to plain text ([#2848](https://github.com/badlogic/pi-mono/pull/2848) by [@aliou](https://github.com/aliou))
+- Fixed interactive command docs to stop listing removed `/exit` as a supported quit command ([#2850](https://github.com/badlogic/pi-mono/issues/2850))
 
 ## [0.65.0] - 2026-04-03
 

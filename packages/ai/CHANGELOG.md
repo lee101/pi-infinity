@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.65.2] - 2026-04-06
+
+## [0.65.1] - 2026-04-05
+
 ### Fixed
 
 - Fixed OpenAI-compatible completions streaming usage to preserve `prompt_tokens_details.cache_write_tokens` and normalize OpenRouter `cached_tokens` to previous-request cache hits only, preventing cache read/write double counting in `usage` and cost calculation ([#2802](https://github.com/badlogic/pi-mono/issues/2802))
