@@ -82,6 +82,7 @@ import { CustomEditor } from "./components/custom-editor.js";
 import { CustomMessageComponent } from "./components/custom-message.js";
 import { DaxnutsComponent } from "./components/daxnuts.js";
 import { DynamicBorder } from "./components/dynamic-border.js";
+import { EarendilAnnouncementComponent } from "./components/earendil-announcement.js";
 import { ExtensionEditorComponent } from "./components/extension-editor.js";
 import { ExtensionInputComponent } from "./components/extension-input.js";
 import { ExtensionSelectorComponent } from "./components/extension-selector.js";
@@ -129,6 +130,13 @@ type CompactionQueuedMessage = {
 	mode: "steer" | "followUp";
 };
 
+const ANTHROPIC_SUBSCRIPTION_AUTH_WARNING =
+	"Anthropic subscription auth is active. Third-party usage now draws from extra usage and is billed per token, not your Claude plan limits. Manage extra usage at https://claude.ai/settings/usage.";
+
+function isAnthropicSubscriptionAuthKey(apiKey: string | undefined): boolean {
+	return typeof apiKey === "string" && apiKey.startsWith("sk-ant-oat");
+}
+
 /**
  * Options for InteractiveMode initialization.
  */
@@ -174,6 +182,8 @@ export class InteractiveMode {
 	private lastSigintTime = 0;
 	private lastEscapeTime = 0;
 	private changelogMarkdown: string | undefined = undefined;
+	private startupNoticesShown = false;
+	private anthropicSubscriptionWarningShown = false;
 
 	// Status line tracking (for mutating immediately-sequential status updates)
 	private lastStatusSpacer: Spacer | undefined = undefined;
@@ -428,6 +438,48 @@ export class InteractiveMode {
 		}
 	}
 
+	private shouldShowEarendilAnnouncement(): boolean {
+		const now = new Date();
+		return now.getFullYear() === 2026 && now.getMonth() === 3 && (now.getDate() === 8 || now.getDate() === 9);
+	}
+
+	private showStartupNoticesIfNeeded(): void {
+		if (this.startupNoticesShown) {
+			return;
+		}
+		this.startupNoticesShown = true;
+
+		if (this.shouldShowEarendilAnnouncement()) {
+			if (this.chatContainer.children.length > 0) {
+				this.chatContainer.addChild(new Spacer(1));
+			}
+			this.chatContainer.addChild(new EarendilAnnouncementComponent());
+		}
+
+		if (!this.changelogMarkdown) {
+			return;
+		}
+
+		if (this.chatContainer.children.length > 0) {
+			this.chatContainer.addChild(new Spacer(1));
+		}
+		this.chatContainer.addChild(new DynamicBorder());
+		if (this.settingsManager.getCollapseChangelog()) {
+			const versionMatch = this.changelogMarkdown.match(/##\s+\[?(\d+\.\d+\.\d+)\]?/);
+			const latestVersion = versionMatch ? versionMatch[1] : this.version;
+			const condensedText = `Updated to v${latestVersion}. Use ${theme.bold("/changelog")} to view full changelog.`;
+			this.chatContainer.addChild(new Text(condensedText, 1, 0));
+		} else {
+			this.chatContainer.addChild(new Text(theme.bold(theme.fg("accent", "What's New")), 1, 0));
+			this.chatContainer.addChild(new Spacer(1));
+			this.chatContainer.addChild(
+				new Markdown(this.changelogMarkdown.trim(), 1, 0, this.getMarkdownThemeWithSettings()),
+			);
+			this.chatContainer.addChild(new Spacer(1));
+		}
+		this.chatContainer.addChild(new DynamicBorder());
+	}
+
 	async init(): Promise<void> {
 		if (this.isInitialized) return;
 
@@ -480,37 +532,10 @@ export class InteractiveMode {
 			this.headerContainer.addChild(new Spacer(1));
 			this.headerContainer.addChild(this.builtInHeader);
 			this.headerContainer.addChild(new Spacer(1));
-
-			// Add changelog if provided
-			if (this.changelogMarkdown) {
-				this.headerContainer.addChild(new DynamicBorder());
-				if (this.settingsManager.getCollapseChangelog()) {
-					const versionMatch = this.changelogMarkdown.match(/##\s+\[?(\d+\.\d+\.\d+)\]?/);
-					const latestVersion = versionMatch ? versionMatch[1] : this.version;
-					const condensedText = `Updated to v${latestVersion}. Use ${theme.bold("/changelog")} to view full changelog.`;
-					this.headerContainer.addChild(new Text(condensedText, 1, 0));
-				} else {
-					this.headerContainer.addChild(new Text(theme.bold(theme.fg("accent", "What's New")), 1, 0));
-					this.headerContainer.addChild(new Spacer(1));
-					this.headerContainer.addChild(
-						new Markdown(this.changelogMarkdown.trim(), 1, 0, this.getMarkdownThemeWithSettings()),
-					);
-					this.headerContainer.addChild(new Spacer(1));
-				}
-				this.headerContainer.addChild(new DynamicBorder());
-			}
 		} else {
 			// Minimal header when silenced
 			this.builtInHeader = new Text("", 0, 0);
 			this.headerContainer.addChild(this.builtInHeader);
-			if (this.changelogMarkdown) {
-				// Still show changelog notification even in silent mode
-				this.headerContainer.addChild(new Spacer(1));
-				const versionMatch = this.changelogMarkdown.match(/##\s+\[?(\d+\.\d+\.\d+)\]?/);
-				const latestVersion = versionMatch ? versionMatch[1] : this.version;
-				const condensedText = `Updated to v${latestVersion}. Use ${theme.bold("/changelog")} to view full changelog.`;
-				this.headerContainer.addChild(new Text(condensedText, 1, 0));
-			}
 		}
 
 		this.ui.addChild(this.chatContainer);
@@ -614,6 +639,8 @@ export class InteractiveMode {
 		if (modelFallbackMessage) {
 			this.showWarning(modelFallbackMessage);
 		}
+
+		void this.maybeWarnAboutAnthropicSubscriptionAuth();
 
 		// Process initial messages
 		if (initialMessage) {
@@ -1250,11 +1277,13 @@ export class InteractiveMode {
 		const extensionRunner = this.session.extensionRunner;
 		if (!extensionRunner) {
 			this.showLoadedResources({ extensions: [], force: false });
+			this.showStartupNoticesIfNeeded();
 			return;
 		}
 
 		this.setupExtensionShortcuts(extensionRunner);
 		this.showLoadedResources({ force: false });
+		this.showStartupNoticesIfNeeded();
 	}
 
 	private applyRuntimeSettings(): void {
@@ -2962,6 +2991,7 @@ export class InteractiveMode {
 				const thinkingStr =
 					result.model.reasoning && result.thinkingLevel !== "off" ? ` (thinking: ${result.thinkingLevel})` : "";
 				this.showStatus(`Switched to ${result.model.name || result.model.id}${thinkingStr}`);
+				void this.maybeWarnAboutAnthropicSubscriptionAuth(result.model);
 			}
 		} catch (error) {
 			this.showError(error instanceof Error ? error.message : String(error));
@@ -3458,6 +3488,7 @@ export class InteractiveMode {
 				this.footer.invalidate();
 				this.updateEditorBorderColor();
 				this.showStatus(`Model: ${model.id}`);
+				void this.maybeWarnAboutAnthropicSubscriptionAuth(model);
 				this.checkDaxnutsEasterEgg(model);
 			} catch (error) {
 				this.showError(error instanceof Error ? error.message : String(error));
@@ -3493,6 +3524,35 @@ export class InteractiveMode {
 		this.footerDataProvider.setAvailableProviderCount(uniqueProviders.size);
 	}
 
+	private async maybeWarnAboutAnthropicSubscriptionAuth(
+		model: Model<any> | undefined = this.session.model,
+	): Promise<void> {
+		if (this.anthropicSubscriptionWarningShown) {
+			return;
+		}
+		if (!model || model.provider !== "anthropic") {
+			return;
+		}
+
+		const storedCredential = this.session.modelRegistry.authStorage.get("anthropic");
+		if (storedCredential?.type === "oauth") {
+			this.anthropicSubscriptionWarningShown = true;
+			this.showWarning(ANTHROPIC_SUBSCRIPTION_AUTH_WARNING);
+			return;
+		}
+
+		try {
+			const apiKey = await this.session.modelRegistry.getApiKeyForProvider(model.provider);
+			if (!isAnthropicSubscriptionAuthKey(apiKey)) {
+				return;
+			}
+			this.anthropicSubscriptionWarningShown = true;
+			this.showWarning(ANTHROPIC_SUBSCRIPTION_AUTH_WARNING);
+		} catch {
+			// Ignore auth lookup failures for warning-only checks.
+		}
+	}
+
 	private showModelSelector(initialSearchInput?: string): void {
 		this.showSelector((done) => {
 			const selector = new ModelSelectorComponent(
@@ -3508,6 +3568,7 @@ export class InteractiveMode {
 						this.updateEditorBorderColor();
 						done();
 						this.showStatus(`Model: ${model.id}`);
+						void this.maybeWarnAboutAnthropicSubscriptionAuth(model);
 						this.checkDaxnutsEasterEgg(model);
 					} catch (error) {
 						done();

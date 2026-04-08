@@ -37,4 +37,5 @@ todo.md
 .pinf
 plans/
 .pi/hf-sessions/
+.pi/hf-sessions-backup/
 collect.sh
