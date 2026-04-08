@@ -45,7 +45,7 @@
 	"engines": {
 		"node": ">=20.0.0"
 	},
-	"version": "0.0.3",
+	"version": "0.0.4",
 	"dependencies": {
 		"@mariozechner/jiti": "^2.6.5",
 		"@mariozechner/pi-coding-agent": "^0.30.2",
