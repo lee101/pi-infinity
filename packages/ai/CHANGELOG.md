@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Bumped default Antigravity User-Agent version to `1.21.9` ([#2901](https://github.com/badlogic/pi-mono/pull/2901) by [@aadishv](https://github.com/aadishv))
+- Fixed thinking levels for Gemma 4 models to use `thinkingLevel` and map Pi reasoning levels to the model's supported thinking levels ([#2903](https://github.com/badlogic/pi-mono/pull/2903) by [@aadishv](https://github.com/aadishv))
+
+## [0.66.1] - 2026-04-08
+
 ## [0.66.0] - 2026-04-08
 
 ### Fixed
