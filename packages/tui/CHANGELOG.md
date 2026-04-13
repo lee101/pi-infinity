@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed `Container.render()` stack overflow on long sessions by replacing `Array.push(...spread)` with a loop-based push, preventing `RangeError: Maximum call stack size exceeded` when child output exceeds the V8 call stack argument limit ([#2651](https://github.com/badlogic/pi-mono/issues/2651))
+- Fixed TUI test suite failures caused by render throttle scheduling: added `VirtualTerminal.waitForRender()` helper that waits for the 16ms throttled render pipeline to settle before asserting viewport state ([#3076](https://github.com/badlogic/pi-mono/pull/3076) by [@aliou](https://github.com/aliou))
 
 ## [0.66.1] - 2026-04-08
 
