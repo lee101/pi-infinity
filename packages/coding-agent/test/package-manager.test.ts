@@ -1,6 +1,8 @@
+import { EventEmitter } from "node:events";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
+import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DefaultPackageManager, type ProgressEvent, type ResolvedResource } from "../src/core/package-manager.js";
 import { SettingsManager } from "../src/core/settings-manager.js";
@@ -11,6 +13,16 @@ function normalizeForMatch(value: string): string {
 
 function pathEndsWith(actualPath: string, suffix: string): boolean {
 	return normalizeForMatch(actualPath).endsWith(normalizeForMatch(suffix));
+}
+
+class MockSpawnedProcess extends EventEmitter {
+	stdout = new PassThrough();
+	stderr = new PassThrough();
+
+	kill(): boolean {
+		this.emit("close", null, "SIGTERM");
+		return true;
+	}
 }
 
 // Helper to check if a resource is enabled
@@ -439,6 +451,51 @@ Content`,
 				["exec", "node@20", "--", "npm", "install", "-g", "@scope/pkg"],
 				undefined,
 			);
+		});
+
+		it("should install git package dependencies with --omit=dev", async () => {
+			const source = "git:github.com/user/repo";
+			const targetDir = join(agentDir, "git", "github.com", "user", "repo");
+			const runCommandSpy = vi
+				.spyOn(packageManager as any, "runCommand")
+				.mockImplementation(async (...callArgs: unknown[]) => {
+					const [command, args] = callArgs as [string, string[]];
+					if (command === "git" && args[0] === "clone") {
+						mkdirSync(targetDir, { recursive: true });
+						writeFileSync(join(targetDir, "package.json"), JSON.stringify({ name: "repo", version: "1.0.0" }));
+					}
+				});
+
+			await packageManager.install(source);
+
+			expect(runCommandSpy).toHaveBeenCalledWith("npm", ["install", "--omit=dev"], { cwd: targetDir });
+		});
+
+		it("should update git package dependencies with --omit=dev", async () => {
+			const source = "git:github.com/user/repo";
+			const targetDir = join(tempDir, ".pi", "git", "github.com", "user", "repo");
+			mkdirSync(targetDir, { recursive: true });
+			writeFileSync(join(targetDir, "package.json"), JSON.stringify({ name: "repo", version: "1.0.0" }));
+			settingsManager.setProjectPackages([source]);
+
+			vi.spyOn(packageManager as any, "runCommandCapture").mockImplementation(async (...callArgs: unknown[]) => {
+				const [_command, args] = callArgs as [string, string[]];
+				if (args[0] === "rev-parse" && args[1] === "--abbrev-ref" && args[2] === "@{upstream}") {
+					return "origin/main";
+				}
+				if (args[0] === "rev-parse" && args[1] === "@{upstream}") {
+					return "remote-head";
+				}
+				if (args[0] === "rev-parse" && args[1] === "HEAD") {
+					return "local-head";
+				}
+				throw new Error(`Unexpected runCommandCapture args: ${args.join(" ")}`);
+			});
+			const runCommandSpy = vi.spyOn(packageManager as any, "runCommand").mockResolvedValue(undefined);
+
+			await packageManager.update(source);
+
+			expect(runCommandSpy).toHaveBeenCalledWith("npm", ["install", "--omit=dev"], { cwd: targetDir });
 		});
 
 		it("should use npmCommand argv for npm root lookup and invalidate cached root when npmCommand changes", () => {
@@ -1400,18 +1457,18 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 			expect(refreshTemporaryGitSourceSpy).not.toHaveBeenCalled();
 		});
 
-		it("should not fetch npm registry during resolve for installed unpinned packages", async () => {
+		it("should not run npm view during resolve for installed unpinned packages", async () => {
 			const installedPath = join(tempDir, ".pinf", "npm", "node_modules", "example");
 			mkdirSync(join(installedPath, "extensions"), { recursive: true });
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
 			writeFileSync(join(installedPath, "extensions", "index.ts"), "export default function() {};");
 			settingsManager.setProjectPackages(["npm:example"]);
 
-			const fetchSpy = vi.spyOn(globalThis, "fetch");
+			const runCommandCaptureSpy = vi.spyOn(packageManager as any, "runCommandCapture");
 
 			const result = await packageManager.resolve();
 			expect(result.extensions.some((r) => pathEndsWith(r.path, "extensions/index.ts") && r.enabled)).toBe(true);
-			expect(fetchSpy).not.toHaveBeenCalled();
+			expect(runCommandCaptureSpy).not.toHaveBeenCalled();
 		});
 
 		it("should reinstall pinned npm packages when installed version does not match", async () => {
@@ -1430,11 +1487,11 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 
 		it("should not check package updates when offline", async () => {
 			process.env.PI_OFFLINE = "1";
-			const fetchSpy = vi.spyOn(globalThis, "fetch");
+			const runCommandCaptureSpy = vi.spyOn(packageManager as any, "runCommandCapture");
 
 			const updates = await packageManager.checkForAvailableUpdates();
 			expect(updates).toEqual([]);
-			expect(fetchSpy).not.toHaveBeenCalled();
+			expect(runCommandCaptureSpy).not.toHaveBeenCalled();
 		});
 
 		it("should report updates for installed unpinned npm packages", async () => {
@@ -1443,11 +1500,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
 			settingsManager.setProjectPackages(["npm:example"]);
 
-			const fetchMock = vi.fn().mockResolvedValue({
-				ok: true,
-				json: async () => ({ version: "1.2.3" }),
-			});
-			vi.stubGlobal("fetch", fetchMock);
+			vi.spyOn(packageManager as any, "runCommandCapture").mockResolvedValue('"1.2.3"');
 
 			const updates = await packageManager.checkForAvailableUpdates();
 			expect(updates).toEqual([
@@ -1467,30 +1520,83 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 			const parsedGitSource = (packageManager as any).parseSource("git:github.com/example/repo@v1");
 			const installedGitPath = (packageManager as any).getGitInstallPath(parsedGitSource, "project") as string;
 			mkdirSync(installedGitPath, { recursive: true });
+
 			settingsManager.setProjectPackages(["npm:example@1.0.0", "git:github.com/example/repo@v1"]);
 
-			const fetchSpy = vi.spyOn(globalThis, "fetch");
+			const runCommandCaptureSpy = vi.spyOn(packageManager as any, "runCommandCapture");
 			const gitUpdateSpy = vi.spyOn(packageManager as any, "gitHasAvailableUpdate");
 
 			const updates = await packageManager.checkForAvailableUpdates();
 			expect(updates).toEqual([]);
-			expect(fetchSpy).not.toHaveBeenCalled();
+			expect(runCommandCaptureSpy).not.toHaveBeenCalled();
 			expect(gitUpdateSpy).not.toHaveBeenCalled();
 		});
 
-		it("should pass an AbortSignal timeout when fetching npm latest version", async () => {
-			const fetchMock = vi.fn().mockResolvedValue({
-				ok: true,
-				json: async () => ({ version: "1.2.3" }),
-			});
-			vi.stubGlobal("fetch", fetchMock);
+		it("should use npm view to fetch latest version", async () => {
+			const runCommandCaptureSpy = vi.spyOn(packageManager as any, "runCommandCapture").mockResolvedValue('"1.2.3"');
 
 			const latest = await (packageManager as any).getLatestNpmVersion("example");
 			expect(latest).toBe("1.2.3");
-			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect(runCommandCaptureSpy).toHaveBeenCalledTimes(1);
+			expect(runCommandCaptureSpy).toHaveBeenCalledWith(
+				"npm",
+				["view", "example", "version", "--json"],
+				expect.objectContaining({ cwd: tempDir, timeoutMs: expect.any(Number) }),
+			);
+		});
 
-			const [, options] = fetchMock.mock.calls[0] as [string, RequestInit | undefined];
-			expect(options?.signal).toBeDefined();
+		it("should use npmCommand argv for npm update checks", async () => {
+			settingsManager = SettingsManager.inMemory({
+				npmCommand: ["mise", "exec", "node@20", "--", "npm"],
+			});
+			packageManager = new DefaultPackageManager({
+				cwd: tempDir,
+				agentDir,
+				settingsManager,
+			});
+
+			const runCommandCaptureSpy = vi.spyOn(packageManager as any, "runCommandCapture").mockResolvedValue('"1.2.3"');
+
+			const latest = await (packageManager as any).getLatestNpmVersion("@scope/pkg");
+			expect(latest).toBe("1.2.3");
+			expect(runCommandCaptureSpy).toHaveBeenCalledWith(
+				"mise",
+				["exec", "node@20", "--", "npm", "view", "@scope/pkg", "version", "--json"],
+				expect.objectContaining({ cwd: tempDir }),
+			);
+		});
+
+		it("should wait for close before resolving captured stdout", async () => {
+			const managerWithInternals = packageManager as unknown as {
+				spawnCaptureCommand(
+					command: string,
+					args: string[],
+					options?: { cwd?: string; env?: Record<string, string> },
+				): MockSpawnedProcess;
+				runCommandCapture(
+					command: string,
+					args: string[],
+					options?: { cwd?: string; timeoutMs?: number; env?: Record<string, string> },
+				): Promise<string>;
+			};
+			const child = new MockSpawnedProcess();
+			vi.spyOn(managerWithInternals, "spawnCaptureCommand").mockReturnValue(child);
+
+			let settled = false;
+			const capturePromise = managerWithInternals.runCommandCapture("git", ["rev-parse", "HEAD"]).then((value) => {
+				settled = true;
+				return value;
+			});
+
+			child.emit("exit", 0, null);
+			await Promise.resolve();
+			expect(settled).toBe(false);
+
+			child.stdout.write("abc123\n");
+			child.stdout.end();
+			child.emit("close", 0, null);
+
+			await expect(capturePromise).resolves.toBe("abc123");
 		});
 	});
 });

@@ -73,7 +73,7 @@ function loadContextFileFromDir(dir: string): { path: string; content: string } 
 	return null;
 }
 
-function loadProjectContextFiles(
+export function loadProjectContextFiles(
 	options: { cwd?: string; agentDir?: string } = {},
 ): Array<{ path: string; content: string }> {
 	const resolvedCwd = options.cwd ?? process.cwd();
@@ -126,8 +126,9 @@ export interface DefaultResourceLoaderOptions {
 	noSkills?: boolean;
 	noPromptTemplates?: boolean;
 	noThemes?: boolean;
+	noContextFiles?: boolean;
 	systemPrompt?: string;
-	appendSystemPrompt?: string;
+	appendSystemPrompt?: string[];
 	extensionsOverride?: (base: LoadExtensionsResult) => LoadExtensionsResult;
 	skillsOverride?: (base: { skills: Skill[]; diagnostics: ResourceDiagnostic[] }) => {
 		skills: Skill[];
@@ -163,8 +164,9 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private noSkills: boolean;
 	private noPromptTemplates: boolean;
 	private noThemes: boolean;
+	private noContextFiles: boolean;
 	private systemPromptSource?: string;
-	private appendSystemPromptSource?: string;
+	private appendSystemPromptSource?: string[];
 	private extensionsOverride?: (base: LoadExtensionsResult) => LoadExtensionsResult;
 	private skillsOverride?: (base: { skills: Skill[]; diagnostics: ResourceDiagnostic[] }) => {
 		skills: Skill[];
@@ -220,6 +222,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.noSkills = options.noSkills ?? false;
 		this.noPromptTemplates = options.noPromptTemplates ?? false;
 		this.noThemes = options.noThemes ?? false;
+		this.noContextFiles = options.noContextFiles ?? false;
 		this.systemPromptSource = options.systemPrompt;
 		this.appendSystemPromptSource = options.appendSystemPrompt;
 		this.extensionsOverride = options.extensionsOverride;
@@ -448,7 +451,9 @@ export class DefaultResourceLoader implements ResourceLoader {
 			}
 		}
 
-		const agentsFiles = { agentsFiles: loadProjectContextFiles({ cwd: this.cwd, agentDir: this.agentDir }) };
+		const agentsFiles = {
+			agentsFiles: this.noContextFiles ? [] : loadProjectContextFiles({ cwd: this.cwd, agentDir: this.agentDir }),
+		};
 		const resolvedAgentsFiles = this.agentsFilesOverride ? this.agentsFilesOverride(agentsFiles) : agentsFiles;
 		this.agentsFiles = resolvedAgentsFiles.agentsFiles;
 
@@ -458,9 +463,12 @@ export class DefaultResourceLoader implements ResourceLoader {
 		);
 		this.systemPrompt = this.systemPromptOverride ? this.systemPromptOverride(baseSystemPrompt) : baseSystemPrompt;
 
-		const appendSource = this.appendSystemPromptSource ?? this.discoverAppendSystemPromptFile();
-		const resolvedAppend = resolvePromptInput(appendSource, "append system prompt");
-		const baseAppend = resolvedAppend ? [resolvedAppend] : [];
+		const appendSources =
+			this.appendSystemPromptSource ??
+			(this.discoverAppendSystemPromptFile() ? [this.discoverAppendSystemPromptFile()!] : []);
+		const baseAppend = appendSources
+			.map((s) => resolvePromptInput(s, "append system prompt"))
+			.filter((s): s is string => s !== undefined);
 		this.appendSystemPrompt = this.appendSystemPromptOverride
 			? this.appendSystemPromptOverride(baseAppend)
 			: baseAppend;

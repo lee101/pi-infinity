@@ -1,15 +1,3 @@
-<!-- OSS_WEEKEND_START -->
-# 🏖️ OSS Weekend
-
-**Issue tracker reopens Monday, April 13, 2026.**
-
-OSS weekend runs Thursday, April 2, 2026 through Monday, April 13, 2026. New issues and PRs from unapproved contributors are auto-closed during this time. Approved contributors can still open issues and PRs if something is genuinely urgent, but please keep that to pressing matters only. For support, join [Discord](https://discord.com/invite/3cU7Bz4UPx).
-
-> _Current focus: at the moment i'm deep in refactoring internals, and need to focus._
-<!-- OSS_WEEKEND_END -->
-
----
-
 <p align="center">
   <a href="https://shittycodingagent.ai">
     <img src="https://shittycodingagent.ai/logo.svg" alt="pi logo" width="128">
@@ -26,11 +14,15 @@ OSS weekend runs Thursday, April 2, 2026 through Monday, April 13, 2026. New iss
   <a href="https://exe.dev"><img src="docs/images/exy.png" alt="Exy mascot" width="48" /><br />exe.dev</a>
 </p>
 
-Pinf is a minimal terminal coding harness. Adapt pinf to your workflows, not the other way around, without having to fork and modify pinf internals. Extend it with TypeScript [Extensions](#extensions), [Skills](#skills), [Prompt Templates](#prompt-templates), and [Themes](#themes). Put your extensions, skills, prompt templates, and themes in [Pi Packages](#pi-packages) and share them with others via npm or git.
+> New issues and PRs from new contributors are auto-closed by default. Maintainers review auto-closed issues daily. See [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
-Pinf ships with powerful defaults but skips features like sub agents and plan mode. Instead, you can ask pinf to build what you want or install a third party pi package that matches your workflow.
+---
 
-Pinf runs in four modes: interactive, print or JSON, RPC for process integration, and an SDK for embedding in your own apps. See [openclaw/openclaw](https://github.com/openclaw/openclaw) for a real-world SDK integration.
+Pi is a minimal terminal coding harness. Adapt pi to your workflows, not the other way around, without having to fork and modify pi internals. Extend it with TypeScript [Extensions](#extensions), [Skills](#skills), [Prompt Templates](#prompt-templates), and [Themes](#themes). Put your extensions, skills, prompt templates, and themes in [Pi Packages](#pi-packages) and share them with others via npm or git.
+
+Pi ships with powerful defaults but skips features like sub agents and plan mode. Instead, you can ask pi to build what you want or install a third party pi package that matches your workflow.
+
+Pi runs in four modes: interactive, print or JSON, RPC for process integration, and an SDK for embedding in your own apps. See [openclaw/openclaw](https://github.com/openclaw/openclaw) for a real-world SDK integration.
 
 ## Share your OSS coding agent sessions
 
@@ -77,24 +69,24 @@ I regularly publish my own `pi-mono` work sessions here:
 ## Quick Start
 
 ```bash
-npm install -g @lee101-3/pinf
+npm install -g @mariozechner/pi-coding-agent
 ```
 
 Authenticate with an API key:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-pinf
+pi
 ```
 
 Or use your existing subscription:
 
 ```bash
-pinf
+pi
 /login  # Then select provider
 ```
 
-Then just talk to pinf. By default, pinf gives the model four tools: `read`, `write`, `edit`, and `bash`. The model uses these to fulfill your requests. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [pi packages](#pi-packages).
+Then just talk to pi. By default, pi gives the model four tools: `read`, `write`, `edit`, and `bash`. The model uses these to fulfill your requests. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [pi packages](#pi-packages).
 
 **Platform notes:** [Windows](docs/windows.md) | [Termux (Android)](docs/termux.md) | [tmux](docs/tmux.md) | [Terminal setup](docs/terminal-setup.md) | [Shell aliases](docs/shell-aliases.md)
 
@@ -189,7 +181,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 
 ### Keyboard Shortcuts
 
-See `/hotkeys` for the full list. Customize via `~/.pinf/keybindings.json`. See [docs/keybindings.md](docs/keybindings.md).
+See `/hotkeys` for the full list. Customize via `~/.pi/agent/keybindings.json`. See [docs/keybindings.md](docs/keybindings.md).
 
 **Commonly used:**
 
@@ -226,14 +218,14 @@ Sessions are stored as JSONL files with a tree structure. Each entry has an `id`
 
 ### Management
 
-Sessions auto-save to `~/.pinf/sessions/` organized by working directory.
+Sessions auto-save to `~/.pi/agent/sessions/` organized by working directory.
 
 ```bash
-pinf -c                  # Continue most recent session
-pinf -r                  # Browse and select from past sessions
-pinf --no-session        # Ephemeral mode (don't save)
-pinf --session <path>    # Use specific session file or ID
-pinf --fork <path>       # Fork specific session file or ID into a new session
+pi -c                  # Continue most recent session
+pi -r                  # Browse and select from past sessions
+pi --no-session        # Ephemeral mode (don't save)
+pi --session <path>    # Use specific session file or ID
+pi --fork <path>       # Fork specific session file or ID into a new session
 ```
 
 ### Branching
@@ -268,25 +260,29 @@ Use `/settings` to modify common options, or edit JSON files directly:
 
 | Location | Scope |
 |----------|-------|
-| `~/.pinf/settings.json` | Global (all projects) |
-| `.pinf/settings.json` | Project (overrides global) |
+| `~/.pi/agent/settings.json` | Global (all projects) |
+| `.pi/settings.json` | Project (overrides global) |
 
 See [docs/settings.md](docs/settings.md) for all options.
+
+To opt out of anonymous install/update telemetry tied to changelog detection, set `enableInstallTelemetry` to `false` in `settings.json`, or set `PI_TELEMETRY=0`.
 
 ---
 
 ## Context Files
 
-Pinf loads `AGENTS.md` (or `CLAUDE.md`) at startup from:
-- `~/.pinf/AGENTS.md` (global)
+Pi loads `AGENTS.md` (or `CLAUDE.md`) at startup from:
+- `~/.pi/agent/AGENTS.md` (global)
 - Parent directories (walking up from cwd)
 - Current directory
 
 Use for project instructions, conventions, common commands. All matching files are concatenated.
 
+Disable context file loading with `--no-context-files` (or `-nc`).
+
 ### System Prompt
 
-Replace the default system prompt with `.pinf/SYSTEM.md` (project) or `~/.pinf/SYSTEM.md` (global). Append without replacing via `APPEND_SYSTEM.md`.
+Replace the default system prompt with `.pi/SYSTEM.md` (project) or `~/.pi/agent/SYSTEM.md` (global). Append without replacing via `APPEND_SYSTEM.md`.
 
 ---
 
@@ -297,19 +293,19 @@ Replace the default system prompt with `.pinf/SYSTEM.md` (project) or `~/.pinf/S
 Reusable prompts as Markdown files. Type `/name` to expand.
 
 ```markdown
-<!-- ~/.pinf/prompts/review.md -->
+<!-- ~/.pi/agent/prompts/review.md -->
 Review this code for bugs, security issues, and performance problems.
 Focus on: {{focus}}
 ```
 
-Place in `~/.pinf/prompts/`, `.pinf/prompts/`, or a [pi package](#pi-packages) to share with others. See [docs/prompt-templates.md](docs/prompt-templates.md).
+Place in `~/.pi/agent/prompts/`, `.pi/prompts/`, or a [pi package](#pi-packages) to share with others. See [docs/prompt-templates.md](docs/prompt-templates.md).
 
 ### Skills
 
 On-demand capability packages following the [Agent Skills standard](https://agentskills.io). Invoke via `/skill:name` or let the agent load them automatically.
 
 ```markdown
-<!-- ~/.pinf/skills/my-skill/SKILL.md -->
+<!-- ~/.pi/agent/skills/my-skill/SKILL.md -->
 # My Skill
 Use this skill when the user asks about X.
 
@@ -318,7 +314,7 @@ Use this skill when the user asks about X.
 2. Then that
 ```
 
-Place in `~/.pinf/skills/`, `.pinf/skills/`, or a [pi package](#pi-packages) to share with others. See [docs/skills.md](docs/skills.md).
+Place in `~/.pi/agent/skills/`, `~/.agents/skills/`, `.pi/skills/`, or `.agents/skills/` (from `cwd` up through parent directories) or a [pi package](#pi-packages) to share with others. See [docs/skills.md](docs/skills.md).
 
 ### Extensions
 
@@ -348,13 +344,13 @@ export default function (pi: ExtensionAPI) {
 - Games while waiting (yes, Doom runs)
 - ...anything you can dream up
 
-Place in `~/.pinf/extensions/`, `.pinf/extensions/`, or a [pi package](#pi-packages) to share with others. See [docs/extensions.md](docs/extensions.md) and [examples/extensions/](examples/extensions/).
+Place in `~/.pi/agent/extensions/`, `.pi/extensions/`, or a [pi package](#pi-packages) to share with others. See [docs/extensions.md](docs/extensions.md) and [examples/extensions/](examples/extensions/).
 
 ### Themes
 
-Built-in: `dark`, `light`. Themes hot-reload: modify the active theme file and pinf immediately applies changes.
+Built-in: `dark`, `light`. Themes hot-reload: modify the active theme file and pi immediately applies changes.
 
-Place in `~/.pinf/themes/`, `.pinf/themes/`, or a [pi package](#pi-packages) to share with others. See [docs/themes.md](docs/themes.md).
+Place in `~/.pi/agent/themes/`, `.pi/themes/`, or a [pi package](#pi-packages) to share with others. See [docs/themes.md](docs/themes.md).
 
 ### Pi Packages
 
@@ -363,24 +359,24 @@ Bundle and share extensions, skills, prompts, and themes via npm or git. Find pa
 > **Security:** Pi packages run with full system access. Extensions execute arbitrary code, and skills can instruct the model to perform any action including running executables. Review source code before installing third-party packages.
 
 ```bash
-pinf install npm:@foo/pi-tools
-pinf install npm:@foo/pi-tools@1.2.3      # pinned version
-pinf install git:github.com/user/repo
-pinf install git:github.com/user/repo@v1  # tag or commit
-pinf install git:git@github.com:user/repo
-pinf install git:git@github.com:user/repo@v1  # tag or commit
-pinf install https://github.com/user/repo
-pinf install https://github.com/user/repo@v1      # tag or commit
-pinf install ssh://git@github.com/user/repo
-pinf install ssh://git@github.com/user/repo@v1    # tag or commit
-pinf remove npm:@foo/pi-tools
-pinf uninstall npm:@foo/pi-tools          # alias for remove
-pinf list
-pinf update                               # skips pinned packages
-pinf config                               # enable/disable extensions, skills, prompts, themes
+pi install npm:@foo/pi-tools
+pi install npm:@foo/pi-tools@1.2.3      # pinned version
+pi install git:github.com/user/repo
+pi install git:github.com/user/repo@v1  # tag or commit
+pi install git:git@github.com:user/repo
+pi install git:git@github.com:user/repo@v1  # tag or commit
+pi install https://github.com/user/repo
+pi install https://github.com/user/repo@v1      # tag or commit
+pi install ssh://git@github.com/user/repo
+pi install ssh://git@github.com/user/repo@v1    # tag or commit
+pi remove npm:@foo/pi-tools
+pi uninstall npm:@foo/pi-tools          # alias for remove
+pi list
+pi update                               # skips pinned packages
+pi config                               # enable/disable extensions, skills, prompts, themes
 ```
 
-Packages install to `~/.pinf/git/` (git) or global npm. Use `-l` for project-local installs (`.pinf/git/`, `.pinf/npm/`). If you use a Node version manager and want package installs to reuse a stable npm context, set `npmCommand` in `settings.json`, for example `["mise", "exec", "node@20", "--", "npm"]`.
+Packages install to `~/.pi/agent/git/` (git) or global npm. Use `-l` for project-local installs (`.pi/git/`, `.pi/npm/`). Git packages install dependencies with `npm install --omit=dev`, so runtime deps must be listed under `dependencies`. If you use a Node version manager and want package installs to reuse a stable npm context, set `npmCommand` in `settings.json`, for example `["mise", "exec", "node@20", "--", "npm"]`.
 
 Create a package by adding a `pi` key to `package.json`:
 
@@ -430,7 +426,7 @@ See [docs/sdk.md](docs/sdk.md) and [examples/sdk/](examples/sdk/).
 For non-Node.js integrations, use RPC mode over stdin/stdout:
 
 ```bash
-pinf --mode rpc
+pi --mode rpc
 ```
 
 RPC mode uses strict LF-delimited JSONL framing. Clients must split records on `\n` only. Do not use generic line readers like Node `readline`, which also split on Unicode separators inside JSON payloads.
@@ -441,11 +437,11 @@ See [docs/rpc.md](docs/rpc.md) for the protocol.
 
 ## Philosophy
 
-Pinf is aggressively extensible so it doesn't have to dictate your workflow. Features that other tools bake in can be built with [extensions](#extensions), [skills](#skills), or installed from third-party [pi packages](#pi-packages). This keeps the core minimal while letting you shape pinf to fit how you work.
+Pi is aggressively extensible so it doesn't have to dictate your workflow. Features that other tools bake in can be built with [extensions](#extensions), [skills](#skills), or installed from third-party [pi packages](#pi-packages). This keeps the core minimal while letting you shape pi to fit how you work.
 
 **No MCP.** Build CLI tools with READMEs (see [Skills](#skills)), or build an extension that adds MCP support. [Why?](https://mariozechner.at/posts/2025-11-02-what-if-you-dont-need-mcp/)
 
-**No sub-agents.** There's many ways to do this. Spawn pinf instances via tmux, or build your own with [extensions](#extensions), or install a package that does it your way.
+**No sub-agents.** There's many ways to do this. Spawn pi instances via tmux, or build your own with [extensions](#extensions), or install a package that does it your way.
 
 **No permission popups.** Run in a container, or build your own confirmation flow with [extensions](#extensions) inline with your environment and security requirements.
 
@@ -462,18 +458,18 @@ Read the [blog post](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/) 
 ## CLI Reference
 
 ```bash
-pinf [options] [@files...] [messages...]
+pi [options] [@files...] [messages...]
 ```
 
 ### Package Commands
 
 ```bash
-pinf install <source> [-l]     # Install package, -l for project-local
-pinf remove <source> [-l]      # Remove package
-pinf uninstall <source> [-l]   # Alias for remove
-pinf update [source]           # Update packages (skips pinned)
-pinf list                      # List installed packages
-pinf config                    # Enable/disable package resources
+pi install <source> [-l]     # Install package, -l for project-local
+pi remove <source> [-l]      # Remove package
+pi uninstall <source> [-l]   # Alias for remove
+pi update [source]           # Update packages (skips pinned)
+pi list                      # List installed packages
+pi config                    # Enable/disable package resources
 ```
 
 ### Modes
@@ -535,6 +531,7 @@ Available built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`
 | `--no-prompt-templates` | Disable prompt template discovery |
 | `--theme <path>` | Load theme (repeatable) |
 | `--no-themes` | Disable theme discovery |
+| `--no-context-files`, `-nc` | Disable AGENTS.md and CLAUDE.md context file discovery |
 
 Combine `--no-*` with explicit flags to load exactly what you need, ignoring settings.json (e.g., `--no-extensions -e ./my-ext.ts`).
 
@@ -553,25 +550,25 @@ Combine `--no-*` with explicit flags to load exactly what you need, ignoring set
 Prefix files with `@` to include in the message:
 
 ```bash
-pinf @prompt.md "Answer this"
-pinf -p @screenshot.png "What's in this image?"
-pinf @code.ts @test.ts "Review these files"
+pi @prompt.md "Answer this"
+pi -p @screenshot.png "What's in this image?"
+pi @code.ts @test.ts "Review these files"
 ```
 
 ### Examples
 
 ```bash
 # Interactive with initial prompt
-pinf "List all .ts files in src/"
+pi "List all .ts files in src/"
 
 # Non-interactive
-pinf -p "Summarize this codebase"
+pi -p "Summarize this codebase"
 
 # Non-interactive with piped stdin
 cat README.md | pi -p "Summarize this text"
 
 # Different model
-pinf --provider openai --model gpt-4o "Help me refactor"
+pi --provider openai --model gpt-4o "Help me refactor"
 
 # Model with provider prefix (no --provider needed)
 pi --model openai/gpt-4o "Help me refactor"
@@ -580,23 +577,24 @@ pi --model openai/gpt-4o "Help me refactor"
 pi --model sonnet:high "Solve this complex problem"
 
 # Limit model cycling
-pinf --models "claude-*,gpt-4o"
+pi --models "claude-*,gpt-4o"
 
 # Read-only mode
-pinf --tools read,grep,find,ls -p "Review the code"
+pi --tools read,grep,find,ls -p "Review the code"
 
 # High thinking level
-pinf --thinking high "Solve this complex problem"
+pi --thinking high "Solve this complex problem"
 ```
 
 ### Environment Variables
 
 | Variable | Description |
 |----------|-------------|
-| `PINF_DIR` | Override config directory (default: `~/.pinf`) |
-| `PINF_PACKAGE_DIR` | Override package directory (useful for Nix/Guix where store paths tokenize poorly) |
-| `PINF_SKIP_VERSION_CHECK` | Skip version check at startup |
-| `PINF_CACHE_RETENTION` | Set to `long` for extended prompt cache (Anthropic: 1h, OpenAI: 24h) |
+| `PI_CODING_AGENT_DIR` | Override config directory (default: `~/.pi/agent`) |
+| `PI_PACKAGE_DIR` | Override package directory (useful for Nix/Guix where store paths tokenize poorly) |
+| `PI_SKIP_VERSION_CHECK` | Skip version check at startup |
+| `PI_TELEMETRY` | Override install telemetry. Use `1`/`true`/`yes` to enable or `0`/`false`/`no` to disable |
+| `PI_CACHE_RETENTION` | Set to `long` for extended prompt cache (Anthropic: 1h, OpenAI: 24h) |
 | `VISUAL`, `EDITOR` | External editor for Ctrl+G |
 
 ---

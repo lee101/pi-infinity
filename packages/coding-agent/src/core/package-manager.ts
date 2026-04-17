@@ -1,8 +1,9 @@
-import { spawn, spawnSync } from "node:child_process";
+import { type ChildProcess, type ChildProcessByStdio, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import type { Readable } from "node:stream";
 import ignore from "ignore";
 import { minimatch } from "minimatch";
 import { CONFIG_DIR_NAME } from "../config.js";
@@ -1317,12 +1318,15 @@ export class DefaultPackageManager implements PackageManager {
 	}
 
 	private async getLatestNpmVersion(packageName: string): Promise<string> {
-		const response = await fetch(`https://registry.npmjs.org/${packageName}/latest`, {
-			signal: AbortSignal.timeout(NETWORK_TIMEOUT_MS),
-		});
-		if (!response.ok) throw new Error(`Failed to fetch npm registry: ${response.status}`);
-		const data = (await response.json()) as { version: string };
-		return data.version;
+		const npmCommand = this.getNpmCommand();
+		const stdout = await this.runCommandCapture(
+			npmCommand.command,
+			[...npmCommand.args, "view", packageName, "version", "--json"],
+			{ cwd: this.cwd, timeoutMs: NETWORK_TIMEOUT_MS },
+		);
+		const raw = stdout.trim();
+		if (!raw) throw new Error("Empty response from npm view");
+		return JSON.parse(raw);
 	}
 
 	private async gitHasAvailableUpdate(installedPath: string): Promise<boolean> {
@@ -1594,7 +1598,7 @@ export class DefaultPackageManager implements PackageManager {
 		}
 		const packageJsonPath = join(targetDir, "package.json");
 		if (existsSync(packageJsonPath)) {
-			await this.runNpmCommand(["install"], { cwd: targetDir });
+			await this.runNpmCommand(["install", "--omit=dev"], { cwd: targetDir });
 		}
 	}
 
@@ -1629,7 +1633,7 @@ export class DefaultPackageManager implements PackageManager {
 
 		const packageJsonPath = join(targetDir, "package.json");
 		if (existsSync(packageJsonPath)) {
-			await this.runNpmCommand(["install"], { cwd: targetDir });
+			await this.runNpmCommand(["install", "--omit=dev"], { cwd: targetDir });
 		}
 	}
 
@@ -2174,18 +2178,34 @@ export class DefaultPackageManager implements PackageManager {
 		};
 	}
 
+	private spawnCommand(command: string, args: string[], options?: { cwd?: string }): ChildProcess {
+		return spawn(command, args, {
+			cwd: options?.cwd,
+			stdio: isStdoutTakenOver() ? ["ignore", 2, 2] : "inherit",
+			shell: process.platform === "win32",
+		});
+	}
+
+	private spawnCaptureCommand(
+		command: string,
+		args: string[],
+		options?: { cwd?: string; env?: Record<string, string> },
+	): ChildProcessByStdio<null, Readable, Readable> {
+		return spawn(command, args, {
+			cwd: options?.cwd,
+			stdio: ["ignore", "pipe", "pipe"],
+			shell: process.platform === "win32",
+			env: options?.env ? { ...process.env, ...options.env } : process.env,
+		});
+	}
+
 	private runCommandCapture(
 		command: string,
 		args: string[],
 		options?: { cwd?: string; timeoutMs?: number; env?: Record<string, string> },
 	): Promise<string> {
 		return new Promise((resolvePromise, reject) => {
-			const child = spawn(command, args, {
-				cwd: options?.cwd,
-				stdio: ["ignore", "pipe", "pipe"],
-				shell: process.platform === "win32",
-				env: options?.env ? { ...process.env, ...options.env } : process.env,
-			});
+			const child = this.spawnCaptureCommand(command, args, options);
 			let stdout = "";
 			let stderr = "";
 			let timedOut = false;
@@ -2203,11 +2223,11 @@ export class DefaultPackageManager implements PackageManager {
 			child.stderr?.on("data", (data) => {
 				stderr += data.toString();
 			});
-			child.on("error", (error) => {
+			child.once("error", (error) => {
 				if (timeout) clearTimeout(timeout);
 				reject(error);
 			});
-			child.on("exit", (code) => {
+			child.once("close", (code, signal) => {
 				if (timeout) clearTimeout(timeout);
 				if (timedOut) {
 					reject(new Error(`${command} ${args.join(" ")} timed out after ${options?.timeoutMs}ms`));
@@ -2217,18 +2237,15 @@ export class DefaultPackageManager implements PackageManager {
 					resolvePromise(stdout.trim());
 					return;
 				}
-				reject(new Error(`${command} ${args.join(" ")} failed with code ${code}: ${stderr || stdout}`));
+				const exitStatus = code === null ? `signal ${signal ?? "unknown"}` : `code ${code}`;
+				reject(new Error(`${command} ${args.join(" ")} failed with ${exitStatus}: ${stderr || stdout}`));
 			});
 		});
 	}
 
 	private runCommand(command: string, args: string[], options?: { cwd?: string }): Promise<void> {
 		return new Promise((resolvePromise, reject) => {
-			const child = spawn(command, args, {
-				cwd: options?.cwd,
-				stdio: isStdoutTakenOver() ? ["ignore", 2, 2] : "inherit",
-				shell: process.platform === "win32",
-			});
+			const child = this.spawnCommand(command, args, options);
 			child.on("error", reject);
 			child.on("exit", (code) => {
 				if (code === 0) {
