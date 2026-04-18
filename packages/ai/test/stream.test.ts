@@ -767,11 +767,12 @@ describe("Generate E2E Tests", () => {
 
 		it("should handle thinking mode", { retry: 3 }, async () => {
 			const llm = getModel("mistral", "magistral-medium-latest");
-			await handleThinking(llm, { reasoningEffort: "medium" });
+			await handleThinking(llm, { promptMode: "reasoning" });
 		});
 
 		it("should handle multi-turn with thinking and tools", { retry: 3 }, async () => {
-			await multiTurn(llm, { reasoningEffort: "medium" });
+			const llm = getModel("mistral", "magistral-medium-latest");
+			await multiTurn(llm, { promptMode: "reasoning" });
 		});
 	});
 

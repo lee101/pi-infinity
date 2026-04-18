@@ -92,14 +92,24 @@ function prepareEditArguments(input: unknown): EditToolInput {
 		return input as EditToolInput;
 	}
 
-	const args = input as LegacyEditToolInput;
-	if (typeof args.oldText !== "string" || typeof args.newText !== "string") {
-		return input as EditToolInput;
+	const args = input as Record<string, unknown>;
+
+	// Some models (Opus 4.6, GLM-5.1) send edits as a JSON string instead of an array
+	if (typeof args.edits === "string") {
+		try {
+			const parsed = JSON.parse(args.edits);
+			if (Array.isArray(parsed)) args.edits = parsed;
+		} catch {}
 	}
 
-	const edits = Array.isArray(args.edits) ? [...args.edits] : [];
-	edits.push({ oldText: args.oldText, newText: args.newText });
-	const { oldText: _oldText, newText: _newText, ...rest } = args;
+	const legacy = args as LegacyEditToolInput;
+	if (typeof legacy.oldText !== "string" || typeof legacy.newText !== "string") {
+		return args as EditToolInput;
+	}
+
+	const edits = Array.isArray(legacy.edits) ? [...legacy.edits] : [];
+	edits.push({ oldText: legacy.oldText, newText: legacy.newText });
+	const { oldText: _oldText, newText: _newText, ...rest } = legacy;
 	return { ...rest, edits } as EditToolInput;
 }
 

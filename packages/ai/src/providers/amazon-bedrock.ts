@@ -15,15 +15,11 @@ import {
 	type ConverseStreamMetadataEvent,
 	ImageFormat,
 	type Message,
-	type ServiceInputTypes,
-	type ServiceOutputTypes,
 	type SystemContentBlock,
 	type ToolChoice,
 	type ToolConfiguration,
 	ToolResultStatus,
 } from "@aws-sdk/client-bedrock-runtime";
-import type { FinalizeRequestMiddleware } from "@smithy/types";
-
 import { calculateCost } from "../models.js";
 import type {
 	Api,
@@ -119,8 +115,9 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
 			profile: options.profile,
 		};
 
-		// Resolve bearer token for API key auth (bypasses SigV4)
+		// Resolve bearer token for Bedrock API key auth.
 		const bearerToken = options.bearerToken || process.env.AWS_BEARER_TOKEN_BEDROCK || undefined;
+		const useBearerToken = bearerToken !== undefined && process.env.AWS_BEDROCK_SKIP_AUTH !== "1";
 
 		// in Node.js/Bun environment only
 		if (typeof process !== "undefined" && (process.versions?.node || process.versions?.bun)) {
@@ -139,15 +136,6 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
 				config.credentials = {
 					accessKeyId: "dummy-access-key",
 					secretAccessKey: "dummy-secret-key",
-				};
-			}
-
-			// Bearer token auth: use API key instead of SigV4 signing.
-			// Requires bedrock:CallWithBearerToken IAM permission.
-			if (bearerToken && process.env.AWS_BEDROCK_SKIP_AUTH !== "1") {
-				config.credentials = {
-					accessKeyId: "bearer-token-auth",
-					secretAccessKey: "bearer-token-auth",
 				};
 			}
 
@@ -182,37 +170,13 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
 			config.region = options.region || "us-east-1";
 		}
 
+		if (useBearerToken) {
+			config.token = { token: bearerToken };
+			config.authSchemePreference = ["httpBearerAuth"];
+		}
+
 		try {
 			const client = new BedrockRuntimeClient(config);
-
-			// Inject bearer token middleware after SigV4 signing
-			if (bearerToken) {
-				const bearerTokenAuthMiddleware: FinalizeRequestMiddleware<ServiceInputTypes, ServiceOutputTypes> =
-					(next) => async (args) => {
-						const request = args.request;
-						if (
-							typeof request === "object" &&
-							request !== null &&
-							"headers" in request &&
-							typeof request.headers === "object" &&
-							request.headers !== null
-						) {
-							const headers = request.headers as Record<string, string>;
-							headers.authorization = `Bearer ${bearerToken}`;
-							delete headers["x-amz-date"];
-							delete headers["x-amz-security-token"];
-							delete headers["x-amz-content-sha256"];
-						}
-						return next(args);
-					};
-
-				client.middlewareStack.addRelativeTo(bearerTokenAuthMiddleware, {
-					relation: "after",
-					toMiddleware: "awsAuthMiddleware",
-					name: "bearerTokenAuth",
-				});
-			}
-
 			const cacheRetention = resolveCacheRetention(options.cacheRetention);
 			let commandInput = {
 				modelId: model.id,
@@ -812,6 +776,16 @@ function mapStopReason(reason: string | undefined): StopReason {
 	}
 }
 
+function isGovCloudBedrockTarget(model: Model<"bedrock-converse-stream">, options: BedrockOptions): boolean {
+	const region = options.region || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
+	if (region?.toLowerCase().startsWith("us-gov-")) {
+		return true;
+	}
+
+	const modelId = model.id.toLowerCase();
+	return modelId.startsWith("us-gov.") || modelId.startsWith("arn:aws-us-gov:");
+}
+
 function buildAdditionalModelRequestFields(
 	model: Model<"bedrock-converse-stream">,
 	options: BedrockOptions,
@@ -821,12 +795,12 @@ function buildAdditionalModelRequestFields(
 	}
 
 	if (model.id.includes("anthropic.claude") || model.id.includes("anthropic/claude")) {
-		// Default to "summarized" so Opus 4.7 and Mythos Preview behave like
-		// older Claude 4 models (whose API default is also "summarized").
-		const display: BedrockThinkingDisplay = options.thinkingDisplay ?? "summarized";
+		// GovCloud Bedrock currently rejects the Claude thinking.display field.
+		// Omit it there until the GovCloud Converse schema catches up.
+		const display = isGovCloudBedrockTarget(model, options) ? undefined : (options.thinkingDisplay ?? "summarized");
 		const result: Record<string, any> = supportsAdaptiveThinking(model.id)
 			? {
-					thinking: { type: "adaptive", display },
+					thinking: { type: "adaptive", ...(display !== undefined ? { display } : {}) },
 					output_config: { effort: mapThinkingLevelToEffort(options.reasoning, model.id) },
 				}
 			: (() => {
@@ -846,7 +820,7 @@ function buildAdditionalModelRequestFields(
 						thinking: {
 							type: "enabled",
 							budget_tokens: budget,
-							display,
+							...(display !== undefined ? { display } : {}),
 						},
 					};
 				})();
