@@ -7657,7 +7657,7 @@ export const MODELS = {
 				cacheRead: 0.024999999999999998,
 				cacheWrite: 0.08333333333333334,
 			},
-			contextWindow: 1048576,
+			contextWindow: 1000000,
 			maxTokens: 8192,
 		} satisfies Model<"openai-completions">,
 		"google/gemini-2.0-flash-lite-001": {
@@ -8009,13 +8009,13 @@ export const MODELS = {
 			reasoning: false,
 			input: ["text"],
 			cost: {
-				input: 0.09999999999999999,
-				output: 0.32,
+				input: 0.12,
+				output: 0.38,
 				cacheRead: 0,
 				cacheWrite: 0,
 			},
 			contextWindow: 131072,
-			maxTokens: 16384,
+			maxTokens: 131072,
 		} satisfies Model<"openai-completions">,
 		"meta-llama/llama-3.3-70b-instruct:free": {
 			id: "meta-llama/llama-3.3-70b-instruct:free",
@@ -9088,23 +9088,6 @@ export const MODELS = {
 			contextWindow: 128000,
 			maxTokens: 16384,
 		} satisfies Model<"openai-completions">,
-		"openai/gpt-4o:extended": {
-			id: "openai/gpt-4o:extended",
-			name: "OpenAI: GPT-4o (extended)",
-			api: "openai-completions",
-			provider: "openrouter",
-			baseUrl: "https://openrouter.ai/api/v1",
-			reasoning: false,
-			input: ["text", "image"],
-			cost: {
-				input: 6,
-				output: 18,
-				cacheRead: 0,
-				cacheWrite: 0,
-			},
-			contextWindow: 128000,
-			maxTokens: 64000,
-		} satisfies Model<"openai-completions">,
 		"openai/gpt-5": {
 			id: "openai/gpt-5",
 			name: "OpenAI: GPT-5",
@@ -9995,7 +9978,7 @@ export const MODELS = {
 			api: "openai-completions",
 			provider: "openrouter",
 			baseUrl: "https://openrouter.ai/api/v1",
-			reasoning: true,
+			reasoning: false,
 			input: ["text"],
 			cost: {
 				input: 0.071,
