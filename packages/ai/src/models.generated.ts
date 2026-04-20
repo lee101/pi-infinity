@@ -3373,7 +3373,7 @@ export const MODELS = {
 			cost: {
 				input: 1.25,
 				output: 10,
-				cacheRead: 0.31,
+				cacheRead: 0.125,
 				cacheWrite: 0,
 			},
 			contextWindow: 1048576,
@@ -6710,6 +6710,7 @@ export const MODELS = {
 			api: "openai-completions",
 			provider: "opencode",
 			baseUrl: "https://opencode.ai/zen/v1",
+			compat: {"cacheControlFormat":"anthropic"},
 			reasoning: true,
 			input: ["text", "image"],
 			cost: {
@@ -6727,6 +6728,7 @@ export const MODELS = {
 			api: "openai-completions",
 			provider: "opencode",
 			baseUrl: "https://opencode.ai/zen/v1",
+			compat: {"cacheControlFormat":"anthropic"},
 			reasoning: true,
 			input: ["text", "image"],
 			cost: {
@@ -6865,6 +6867,7 @@ export const MODELS = {
 			api: "openai-completions",
 			provider: "opencode-go",
 			baseUrl: "https://opencode.ai/zen/go/v1",
+			compat: {"cacheControlFormat":"anthropic"},
 			reasoning: true,
 			input: ["text", "image"],
 			cost: {
@@ -6882,6 +6885,7 @@ export const MODELS = {
 			api: "openai-completions",
 			provider: "opencode-go",
 			baseUrl: "https://opencode.ai/zen/go/v1",
+			compat: {"cacheControlFormat":"anthropic"},
 			reasoning: true,
 			input: ["text", "image"],
 			cost: {
@@ -8033,23 +8037,6 @@ export const MODELS = {
 			},
 			contextWindow: 65536,
 			maxTokens: 4096,
-		} satisfies Model<"openai-completions">,
-		"meta-llama/llama-4-maverick": {
-			id: "meta-llama/llama-4-maverick",
-			name: "Meta: Llama 4 Maverick",
-			api: "openai-completions",
-			provider: "openrouter",
-			baseUrl: "https://openrouter.ai/api/v1",
-			reasoning: false,
-			input: ["text", "image"],
-			cost: {
-				input: 0.15,
-				output: 0.6,
-				cacheRead: 0,
-				cacheWrite: 0,
-			},
-			contextWindow: 1048576,
-			maxTokens: 16384,
 		} satisfies Model<"openai-completions">,
 		"meta-llama/llama-4-scout": {
 			id: "meta-llama/llama-4-scout",

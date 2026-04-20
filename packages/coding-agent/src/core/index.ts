@@ -70,5 +70,6 @@ export {
 	type ToolResultEvent,
 	type TurnEndEvent,
 	type TurnStartEvent,
+	type WorkingIndicatorOptions,
 } from "./extensions/index.js";
 export { createSyntheticSourceInfo } from "./source-info.js";

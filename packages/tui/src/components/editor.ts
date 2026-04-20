@@ -1,6 +1,6 @@
 import type { AutocompleteProvider, AutocompleteSuggestions, CombinedAutocompleteProvider } from "../autocomplete.js";
 import { getKeybindings } from "../keybindings.js";
-import { decodeKittyPrintable, matchesKey } from "../keys.js";
+import { decodePrintableKey, matchesKey } from "../keys.js";
 import { KillRing } from "../kill-ring.js";
 import { type Component, CURSOR_MARKER, type Focusable, type TUI } from "../tui.js";
 import { UndoStack } from "../undo-stack.js";
@@ -542,11 +542,12 @@ export class Editor implements Component, Focusable {
 				return;
 			}
 
-			if (data.charCodeAt(0) >= 32) {
+			const printable = decodePrintableKey(data) ?? (data.charCodeAt(0) >= 32 ? data : undefined);
+			if (printable !== undefined) {
 				// Printable character - perform the jump
 				const direction = this.jumpMode;
 				this.jumpMode = null;
-				this.jumpToChar(data, direction);
+				this.jumpToChar(printable, direction);
 				return;
 			}
 
@@ -807,9 +808,9 @@ export class Editor implements Component, Focusable {
 			return;
 		}
 
-		const kittyPrintable = decodeKittyPrintable(data);
-		if (kittyPrintable !== undefined) {
-			this.insertCharacter(kittyPrintable);
+		const printable = decodePrintableKey(data);
+		if (printable !== undefined) {
+			this.insertCharacter(printable);
 			return;
 		}
 

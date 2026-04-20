@@ -122,6 +122,7 @@ export type {
 	UserBashEvent,
 	UserBashEventResult,
 	WidgetPlacement,
+	WorkingIndicatorOptions,
 	WriteToolCallEvent,
 } from "./core/extensions/index.js";
 export {

@@ -149,6 +149,7 @@ export type {
 	UserBashEvent,
 	UserBashEventResult,
 	WidgetPlacement,
+	WorkingIndicatorOptions,
 	WriteToolCallEvent,
 	WriteToolResultEvent,
 } from "./types.js";

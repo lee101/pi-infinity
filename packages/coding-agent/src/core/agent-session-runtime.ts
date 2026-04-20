@@ -98,7 +98,7 @@ export class AgentSessionRuntime {
 		targetSessionFile?: string,
 	): Promise<{ cancelled: boolean }> {
 		const runner = this.session.extensionRunner;
-		if (!runner?.hasHandlers("session_before_switch")) {
+		if (!runner.hasHandlers("session_before_switch")) {
 			return { cancelled: false };
 		}
 
@@ -110,15 +110,19 @@ export class AgentSessionRuntime {
 		return { cancelled: result?.cancel === true };
 	}
 
-	private async emitBeforeFork(entryId: string): Promise<{ cancelled: boolean }> {
+	private async emitBeforeFork(
+		entryId: string,
+		options: { position: "before" | "at" },
+	): Promise<{ cancelled: boolean }> {
 		const runner = this.session.extensionRunner;
-		if (!runner?.hasHandlers("session_before_fork")) {
+		if (!runner.hasHandlers("session_before_fork")) {
 			return { cancelled: false };
 		}
 
 		const result = await runner.emit({
 			type: "session_before_fork",
 			entryId,
+			...options,
 		});
 		return { cancelled: result?.cancel === true };
 	}
@@ -191,26 +195,41 @@ export class AgentSessionRuntime {
 		return { cancelled: false };
 	}
 
-	async fork(entryId: string): Promise<{ cancelled: boolean; selectedText?: string }> {
-		const beforeResult = await this.emitBeforeFork(entryId);
+	async fork(
+		entryId: string,
+		options?: { position?: "before" | "at" },
+	): Promise<{ cancelled: boolean; selectedText?: string }> {
+		const position = options?.position ?? "before";
+		const beforeResult = await this.emitBeforeFork(entryId, { position });
 		if (beforeResult.cancelled) {
 			return { cancelled: true };
 		}
+		let targetLeafId: string | null;
+		let selectedText: string | undefined;
 
 		const selectedEntry = this.session.sessionManager.getEntry(entryId);
-		if (!selectedEntry || selectedEntry.type !== "message" || selectedEntry.message.role !== "user") {
+		if (!selectedEntry) {
 			throw new Error("Invalid entry ID for forking");
 		}
 
+		if (position === "at") {
+			targetLeafId = selectedEntry.id;
+		} else {
+			if (selectedEntry.type !== "message" || selectedEntry.message.role !== "user") {
+				throw new Error("Invalid entry ID for forking");
+			}
+			targetLeafId = selectedEntry.parentId;
+			selectedText = extractUserMessageText(selectedEntry.message.content);
+		}
+
 		const previousSessionFile = this.session.sessionFile;
-		const selectedText = extractUserMessageText(selectedEntry.message.content);
 		if (this.session.sessionManager.isPersisted()) {
 			const currentSessionFile = this.session.sessionFile;
 			if (!currentSessionFile) {
 				throw new Error("Persisted session is missing a session file");
 			}
 			const sessionDir = this.session.sessionManager.getSessionDir();
-			if (!selectedEntry.parentId) {
+			if (!targetLeafId) {
 				const sessionManager = SessionManager.create(this.cwd, sessionDir);
 				sessionManager.newSession({ parentSession: currentSessionFile });
 				await this.teardownCurrent();
@@ -226,7 +245,7 @@ export class AgentSessionRuntime {
 			}
 
 			const sourceManager = SessionManager.open(currentSessionFile, sessionDir);
-			const forkedSessionPath = sourceManager.createBranchedSession(selectedEntry.parentId);
+			const forkedSessionPath = sourceManager.createBranchedSession(targetLeafId);
 			if (!forkedSessionPath) {
 				throw new Error("Failed to create forked session");
 			}
@@ -244,10 +263,10 @@ export class AgentSessionRuntime {
 		}
 
 		const sessionManager = this.session.sessionManager;
-		if (!selectedEntry.parentId) {
+		if (!targetLeafId) {
 			sessionManager.newSession({ parentSession: this.session.sessionFile });
 		} else {
-			sessionManager.createBranchedSession(selectedEntry.parentId);
+			sessionManager.createBranchedSession(targetLeafId);
 		}
 		await this.teardownCurrent();
 		this.apply(

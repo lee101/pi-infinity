@@ -34,6 +34,8 @@ const compat: Required<OpenAICompletionsCompat> = {
 	vercelGatewayRouting: {},
 	zaiToolStream: false,
 	supportsStrictMode: true,
+	cacheControlFormat: "anthropic",
+	sendSessionAffinityHeaders: false,
 };
 
 function buildToolResult(toolCallId: string, timestamp: number): ToolResultMessage {

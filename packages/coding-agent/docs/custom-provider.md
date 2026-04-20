@@ -183,12 +183,14 @@ models: [{
     },
       maxTokensField: "max_tokens",      // instead of "max_completion_tokens"
       requiresToolResultName: true,      // tool results need name field
-      thinkingFormat: "qwen"            // top-level enable_thinking: true
+      thinkingFormat: "qwen",           // top-level enable_thinking: true
+      cacheControlFormat: "anthropic"   // Anthropic-style cache_control markers
     }
   }]
 ```
 
 Use `qwen-chat-template` instead for local Qwen-compatible servers that read `chat_template_kwargs.enable_thinking`.
+Use `cacheControlFormat: "anthropic"` for OpenAI-compatible providers that expose Anthropic-style prompt caching via `cache_control` on the system prompt, last tool definition, and last user/assistant text content.
 
 > Migration note: Mistral moved from `openai-completions` to `mistral-conversations`.
 > Use `mistral-conversations` for native Mistral models.
@@ -589,8 +591,10 @@ interface ProviderModelConfig {
     requiresAssistantAfterToolResult?: boolean;
     requiresThinkingAsText?: boolean;
     thinkingFormat?: "openai" | "zai" | "qwen" | "qwen-chat-template";
+    cacheControlFormat?: "anthropic";
   };
 }
 ```
 
 `qwen` is for DashScope-style top-level `enable_thinking`. Use `qwen-chat-template` for local Qwen-compatible servers that read `chat_template_kwargs.enable_thinking`.
+`cacheControlFormat: "anthropic"` applies Anthropic-style `cache_control` markers to the system prompt, last tool definition, and last user/assistant text content.

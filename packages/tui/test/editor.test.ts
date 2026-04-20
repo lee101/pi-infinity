@@ -374,6 +374,22 @@ describe("Editor component", () => {
 
 			assert.strictEqual(editor.getText(), "");
 		});
+
+		it("inserts shifted CSI-u letters as text", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+
+			editor.handleInput("\x1b[69;2u");
+
+			assert.strictEqual(editor.getText(), "E");
+		});
+
+		it("inserts shifted xterm modifyOtherKeys letters as text", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+
+			editor.handleInput("\x1b[27;2;69~");
+
+			assert.strictEqual(editor.getText(), "E");
+		});
 	});
 
 	describe("Unicode text editing behavior", () => {

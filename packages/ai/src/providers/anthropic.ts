@@ -783,8 +783,7 @@ function convertMessages(
 						};
 					}
 				});
-				let filteredBlocks = !model?.input.includes("image") ? blocks.filter((b) => b.type !== "image") : blocks;
-				filteredBlocks = filteredBlocks.filter((b) => {
+				const filteredBlocks = blocks.filter((b) => {
 					if (b.type === "text") {
 						return b.text.trim().length > 0;
 					}

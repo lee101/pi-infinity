@@ -176,7 +176,7 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 		expect(successResult.selectedText).toBe("hello");
 		await runtimeHost.session.bindExtensions({});
 		expect(events).toEqual([
-			{ type: "session_before_fork", entryId: userMessage.entryId },
+			{ type: "session_before_fork", entryId: userMessage.entryId, position: "before" },
 			{ type: "session_start", reason: "fork", previousSessionFile },
 		]);
 
@@ -184,6 +184,12 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 		cancelNextFork = true;
 		const cancelResult = await runtimeHost.fork(userMessage.entryId);
 		expect(cancelResult).toEqual({ cancelled: true });
-		expect(events).toEqual([{ type: "session_before_fork", entryId: userMessage.entryId }]);
+		expect(events).toEqual([{ type: "session_before_fork", entryId: userMessage.entryId, position: "before" }]);
+
+		events.length = 0;
+		cancelNextFork = true;
+		const cancelAtResult = await runtimeHost.fork("missing-entry", { position: "at" });
+		expect(cancelAtResult).toEqual({ cancelled: true });
+		expect(events).toEqual([{ type: "session_before_fork", entryId: "missing-entry", position: "at" }]);
 	});
 });

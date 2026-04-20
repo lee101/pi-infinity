@@ -13,6 +13,7 @@ import type { ResourceLoader } from "./resource-loader.js";
 import { DefaultResourceLoader } from "./resource-loader.js";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.js";
 import { SettingsManager } from "./settings-manager.js";
+import { isInstallTelemetryEnabled } from "./telemetry.js";
 import { time } from "./timings.js";
 import {
 	allTools,
@@ -134,6 +135,23 @@ export {
 
 function getDefaultAgentDir(): string {
 	return getAgentDir();
+}
+
+function getOpenRouterAttributionHeaders(
+	model: Model<any>,
+	settingsManager: SettingsManager,
+): Record<string, string> | undefined {
+	if (!isInstallTelemetryEnabled(settingsManager)) {
+		return undefined;
+	}
+	if (model.provider !== "openrouter" && !model.baseUrl.includes("openrouter.ai")) {
+		return undefined;
+	}
+	return {
+		"HTTP-Referer": "https://pi.dev",
+		"X-OpenRouter-Title": "pi",
+		"X-OpenRouter-Categories": "cli-agent",
+	};
 }
 
 /**
@@ -306,10 +324,14 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			if (!auth.ok) {
 				throw new Error(auth.error);
 			}
+			const openRouterAttributionHeaders = getOpenRouterAttributionHeaders(model, settingsManager);
 			return streamSimple(model, context, {
 				...options,
 				apiKey: auth.apiKey,
-				headers: auth.headers || options?.headers ? { ...auth.headers, ...options?.headers } : undefined,
+				headers:
+					openRouterAttributionHeaders || auth.headers || options?.headers
+						? { ...openRouterAttributionHeaders, ...auth.headers, ...options?.headers }
+						: undefined,
 			});
 		},
 		onPayload: async (payload, _model) => {

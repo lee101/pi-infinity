@@ -102,6 +102,14 @@ export interface ExtensionWidgetOptions {
 /** Raw terminal input listener for extensions. */
 export type TerminalInputHandler = (data: string) => { consume?: boolean; data?: string } | undefined;
 
+/** Working indicator configuration for the interactive streaming loader. */
+export interface WorkingIndicatorOptions {
+	/** Animation frames. Use an empty array to hide the indicator entirely. */
+	frames?: string[];
+	/** Frame interval in milliseconds for animated indicators. */
+	intervalMs?: number;
+}
+
 /**
  * UI context for extensions to request interactive UI.
  * Each mode (interactive, RPC, print) provides its own implementation.
@@ -127,6 +135,15 @@ export interface ExtensionUIContext {
 
 	/** Set the working/loading message shown during streaming. Call with no argument to restore default. */
 	setWorkingMessage(message?: string): void;
+
+	/**
+	 * Configure the interactive working indicator shown during streaming.
+	 *
+	 * - Omit the argument to restore the default animated spinner.
+	 * - Use `frames: ["●"]` for a static indicator.
+	 * - Use `frames: []` to hide the indicator entirely.
+	 */
+	setWorkingIndicator(options?: WorkingIndicatorOptions): void;
 
 	/** Set the label shown for hidden thinking blocks. Call with no argument to restore default. */
 	setHiddenThinkingLabel(label?: string): void;
@@ -309,7 +326,7 @@ export interface ExtensionCommandContext extends ExtensionContext {
 	}): Promise<{ cancelled: boolean }>;
 
 	/** Fork from a specific entry, creating a new session file. */
-	fork(entryId: string): Promise<{ cancelled: boolean }>;
+	fork(entryId: string, options?: { position?: "before" | "at" }): Promise<{ cancelled: boolean }>;
 
 	/** Navigate to a different point in the session tree. */
 	navigateTree(
@@ -473,6 +490,7 @@ export interface SessionBeforeSwitchEvent {
 export interface SessionBeforeForkEvent {
 	type: "session_before_fork";
 	entryId: string;
+	position: "before" | "at";
 }
 
 /** Fired before context compaction (can be cancelled or customized) */
@@ -1423,7 +1441,7 @@ export interface ExtensionCommandContextActions {
 		parentSession?: string;
 		setup?: (sessionManager: SessionManager) => Promise<void>;
 	}) => Promise<{ cancelled: boolean }>;
-	fork: (entryId: string) => Promise<{ cancelled: boolean }>;
+	fork: (entryId: string, options?: { position?: "before" | "at" }) => Promise<{ cancelled: boolean }>;
 	navigateTree: (
 		targetId: string,
 		options?: { summarize?: boolean; customInstructions?: string; replaceInstructions?: boolean; label?: string },
