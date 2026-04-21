@@ -382,7 +382,3 @@ export function createGrepToolDefinition(
 export function createGrepTool(cwd: string, options?: GrepToolOptions): AgentTool<typeof grepSchema> {
 	return wrapToolDefinition(createGrepToolDefinition(cwd, options));
 }
-
-/** Default grep tool using process.cwd() for backwards compatibility. */
-export const grepToolDefinition = createGrepToolDefinition(process.cwd());
-export const grepTool = createGrepTool(process.cwd());

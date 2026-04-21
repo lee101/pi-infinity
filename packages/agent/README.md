@@ -101,8 +101,10 @@ prompt("Read config.json")
 
 Tool execution mode is configurable:
 
-- `parallel` (default): preflight tool calls sequentially, execute allowed tools concurrently, emit final `tool_execution_end` and `toolResult` messages in assistant source order
+- `parallel` (default): preflight tool calls sequentially, execute allowed tools concurrently, and emit `tool_execution_end`, toolResult messages, and `turn_end.toolResults` in the order tool calls finish
 - `sequential`: execute tool calls one by one, matching the historical behavior
+
+In parallel mode, final tool lifecycle and tool-result artifacts follow tool completion order, not assistant source order. A later tool call may therefore finish before an earlier one, including when it is blocked during preflight.
 
 The mode can be set globally via `toolExecution` in the agent config, or per-tool via `executionMode` on `AgentTool`. If any tool call in a batch targets a tool with `executionMode: "sequential"`, the entire batch executes sequentially regardless of the global setting.
 

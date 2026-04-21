@@ -57,6 +57,12 @@ const AI_GATEWAY_MODELS_URL = "https://ai-gateway.vercel.sh/v1";
 const AI_GATEWAY_BASE_URL = "https://ai-gateway.vercel.sh";
 const ZAI_TOOL_STREAM_UNSUPPORTED_MODELS = new Set(["glm-4.5", "glm-4.5-air", "glm-4.5-flash", "glm-4.5v"]);
 
+function getBedrockBaseUrl(modelId: string): string {
+	return modelId.startsWith("eu.")
+		? "https://bedrock-runtime.eu-central-1.amazonaws.com"
+		: "https://bedrock-runtime.us-east-1.amazonaws.com";
+}
+
 async function fetchOpenRouterModels(): Promise<Model<any>[]> {
 	try {
 		console.log("Fetching models from OpenRouter API...");
@@ -204,7 +210,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					name: m.name || id,
 					api: "bedrock-converse-stream" as const,
 					provider: "amazon-bedrock" as const,
-					baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+					baseUrl: getBedrockBaseUrl(id),
 					reasoning: m.reasoning === true,
 					input: (m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"]) as ("text" | "image")[],
 					cost: {
@@ -740,7 +746,7 @@ async function generateModels() {
 			name: "Claude Opus 4.6 (EU)",
 			api: "bedrock-converse-stream",
 			provider: "amazon-bedrock",
-			baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+			baseUrl: getBedrockBaseUrl("eu.anthropic.claude-opus-4-6-v1"),
 			reasoning: true,
 			input: ["text", "image"],
 			cost: {

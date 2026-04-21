@@ -309,8 +309,8 @@ describe("AgentSession model and extension characterization", () => {
 					pi.on("session_start", async (event) => {
 						lifecycleEvents.push(`start:${event.reason}`);
 					});
-					pi.on("session_shutdown", async () => {
-						lifecycleEvents.push("shutdown");
+					pi.on("session_shutdown", async (event) => {
+						lifecycleEvents.push(`shutdown:${event.reason}`);
 					});
 				},
 			],
@@ -320,6 +320,6 @@ describe("AgentSession model and extension characterization", () => {
 		await harness.session.bindExtensions({ shutdownHandler: () => {} });
 		await harness.session.reload();
 
-		expect(lifecycleEvents).toEqual(["start:startup", "shutdown", "start:reload"]);
+		expect(lifecycleEvents).toEqual(["start:startup", "shutdown:reload", "start:reload"]);
 	});
 });

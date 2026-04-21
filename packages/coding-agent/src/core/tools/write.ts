@@ -279,7 +279,3 @@ export function createWriteToolDefinition(
 export function createWriteTool(cwd: string, options?: WriteToolOptions): AgentTool<typeof writeSchema> {
 	return wrapToolDefinition(createWriteToolDefinition(cwd, options));
 }
-
-/** Default write tool using process.cwd() for backwards compatibility. */
-export const writeToolDefinition = createWriteToolDefinition(process.cwd());
-export const writeTool = createWriteTool(process.cwd());

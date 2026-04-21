@@ -16,6 +16,7 @@ import type {
 	AssistantMessage,
 	CacheRetention,
 	Context,
+	ImageContent,
 	Message,
 	Model,
 	OpenAICompletionsCompat,
@@ -54,6 +55,22 @@ function hasToolHistory(messages: Message[]): boolean {
 		}
 	}
 	return false;
+}
+
+function isTextContentBlock(block: { type: string }): block is TextContent {
+	return block.type === "text";
+}
+
+function isThinkingContentBlock(block: { type: string }): block is ThinkingContent {
+	return block.type === "thinking";
+}
+
+function isToolCallBlock(block: { type: string }): block is ToolCall {
+	return block.type === "toolCall";
+}
+
+function isImageContentBlock(block: { type: string }): block is ImageContent {
+	return block.type === "image";
 }
 
 export interface OpenAICompletionsOptions extends StreamOptions {
@@ -716,42 +733,54 @@ export function convertMessages(
 				content: compat.requiresAssistantAfterToolResult ? "" : null,
 			};
 
-			const textBlocks = msg.content.filter((b) => b.type === "text") as TextContent[];
-			// Filter out empty text blocks to avoid API validation errors
-			const nonEmptyTextBlocks = textBlocks.filter((b) => b.text && b.text.trim().length > 0);
-			if (nonEmptyTextBlocks.length > 0) {
+			const assistantTextParts = msg.content
+				.filter(isTextContentBlock)
+				.filter((block) => block.text.trim().length > 0)
+				.map(
+					(block) =>
+						({
+							type: "text",
+							text: sanitizeSurrogates(block.text),
+						}) satisfies ChatCompletionContentPartText,
+				);
+			const assistantText = assistantTextParts.map((part) => part.text).join("");
+
+			const nonEmptyThinkingBlocks = msg.content
+				.filter(isThinkingContentBlock)
+				.filter((block) => block.thinking.trim().length > 0);
+			if (nonEmptyThinkingBlocks.length > 0) {
+				if (compat.requiresThinkingAsText) {
+					// Convert thinking blocks to plain text (no tags to avoid model mimicking them)
+					const thinkingText = nonEmptyThinkingBlocks
+						.map((block) => sanitizeSurrogates(block.thinking))
+						.join("\n\n");
+					assistantMsg.content = [{ type: "text", text: thinkingText }, ...assistantTextParts];
+				} else {
+					// Always send assistant content as a plain string (OpenAI Chat Completions
+					// API standard format). Sending as an array of {type:"text", text:"..."}
+					// objects is non-standard and causes some models (e.g. DeepSeek V3.2 via
+					// NVIDIA NIM) to mirror the content-block structure literally in their
+					// output, producing recursive nesting like [{'type':'text','text':'[{...}]'}].
+					if (assistantText.length > 0) {
+						assistantMsg.content = assistantText;
+					}
+
+					// Use the signature from the first thinking block if available (for llama.cpp server + gpt-oss)
+					const signature = nonEmptyThinkingBlocks[0].thinkingSignature;
+					if (signature && signature.length > 0) {
+						(assistantMsg as any)[signature] = nonEmptyThinkingBlocks.map((block) => block.thinking).join("\n");
+					}
+				}
+			} else if (assistantText.length > 0) {
 				// Always send assistant content as a plain string (OpenAI Chat Completions
 				// API standard format). Sending as an array of {type:"text", text:"..."}
 				// objects is non-standard and causes some models (e.g. DeepSeek V3.2 via
 				// NVIDIA NIM) to mirror the content-block structure literally in their
 				// output, producing recursive nesting like [{'type':'text','text':'[{...}]'}].
-				assistantMsg.content = nonEmptyTextBlocks.map((b) => sanitizeSurrogates(b.text)).join("");
+				assistantMsg.content = assistantText;
 			}
 
-			// Handle thinking blocks
-			const thinkingBlocks = msg.content.filter((b) => b.type === "thinking") as ThinkingContent[];
-			// Filter out empty thinking blocks to avoid API validation errors
-			const nonEmptyThinkingBlocks = thinkingBlocks.filter((b) => b.thinking && b.thinking.trim().length > 0);
-			if (nonEmptyThinkingBlocks.length > 0) {
-				if (compat.requiresThinkingAsText) {
-					// Convert thinking blocks to plain text (no tags to avoid model mimicking them)
-					const thinkingText = nonEmptyThinkingBlocks.map((b) => b.thinking).join("\n\n");
-					const textContent = assistantMsg.content as Array<{ type: "text"; text: string }> | null;
-					if (textContent) {
-						textContent.unshift({ type: "text", text: thinkingText });
-					} else {
-						assistantMsg.content = [{ type: "text", text: thinkingText }];
-					}
-				} else {
-					// Use the signature from the first thinking block if available (for llama.cpp server + gpt-oss)
-					const signature = nonEmptyThinkingBlocks[0].thinkingSignature;
-					if (signature && signature.length > 0) {
-						(assistantMsg as any)[signature] = nonEmptyThinkingBlocks.map((b) => b.thinking).join("\n");
-					}
-				}
-			}
-
-			const toolCalls = msg.content.filter((b) => b.type === "toolCall") as ToolCall[];
+			const toolCalls = msg.content.filter(isToolCallBlock);
 			if (toolCalls.length > 0) {
 				assistantMsg.tool_calls = toolCalls.map((tc) => ({
 					id: tc.id,
@@ -797,8 +826,8 @@ export function convertMessages(
 
 				// Extract text and image content
 				const textResult = toolMsg.content
-					.filter((c) => c.type === "text")
-					.map((c) => (c as any).text)
+					.filter(isTextContentBlock)
+					.map((block) => block.text)
 					.join("\n");
 				const hasImages = toolMsg.content.some((c) => c.type === "image");
 
@@ -817,11 +846,11 @@ export function convertMessages(
 
 				if (hasImages && model.input.includes("image")) {
 					for (const block of toolMsg.content) {
-						if (block.type === "image") {
+						if (isImageContentBlock(block)) {
 							imageBlocks.push({
 								type: "image_url",
 								image_url: {
-									url: `data:${(block as any).mimeType};base64,${(block as any).data}`,
+									url: `data:${block.mimeType};base64,${block.data}`,
 								},
 							});
 						}

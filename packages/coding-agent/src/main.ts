@@ -39,7 +39,6 @@ import {
 import { SessionManager } from "./core/session-manager.js";
 import { SettingsManager } from "./core/settings-manager.js";
 import { printTimings, resetTimings, time } from "./core/timings.js";
-import { allTools } from "./core/tools/index.js";
 import { runMigrations, showDeprecationWarnings } from "./migrations.js";
 import { InteractiveMode, runPrintMode, runRpcMode } from "./modes/index.js";
 import { ExtensionSelectorComponent } from "./modes/interactive/components/extension-selector.js";
@@ -368,14 +367,10 @@ function buildSessionOptions(
 	// Tools
 	if (parsed.noTools) {
 		// --no-tools: start with no built-in tools
-		// --tools can still add specific ones back
-		if (parsed.tools && parsed.tools.length > 0) {
-			options.tools = parsed.tools.map((name) => allTools[name]);
-		} else {
-			options.tools = [];
-		}
+		// --tools can still add specific ones back, including extension tools.
+		options.tools = parsed.tools && parsed.tools.length > 0 ? [...parsed.tools] : [];
 	} else if (parsed.tools) {
-		options.tools = parsed.tools.map((name) => allTools[name]);
+		options.tools = [...parsed.tools];
 	}
 
 	// Autonomous mode flags

@@ -4,10 +4,26 @@
 
 ### Fixed
 
+- Fixed Bedrock runtime endpoint resolution to stop pinning built-in regional endpoints over `AWS_REGION` / `AWS_PROFILE`, restoring `us.*` and `eu.*` inference profile support after v0.68.0 while preserving custom VPC/proxy endpoint overrides ([#3481](https://github.com/badlogic/pi-mono/issues/3481), [#3485](https://github.com/badlogic/pi-mono/issues/3485), [#3486](https://github.com/badlogic/pi-mono/issues/3486), [#3487](https://github.com/badlogic/pi-mono/issues/3487), [#3488](https://github.com/badlogic/pi-mono/issues/3488))
+
+## [0.68.0] - 2026-04-20
+
+### Added
+
+- Added `PI_OAUTH_CALLBACK_HOST` support for built-in Anthropic, Gemini CLI, Google Antigravity, and OpenAI Codex OAuth flows, allowing local callback servers to bind to a custom interface instead of hardcoded `127.0.0.1` ([#3409](https://github.com/badlogic/pi-mono/pull/3409) by [@Michaelliv](https://github.com/Michaelliv))
+
+### Changed
+
+- Changed Bedrock Converse requests to omit `inferenceConfig.maxTokens` when model token limits are unknown and to omit `temperature` when unset, letting Bedrock use model defaults and avoid unnecessary TPM quota reservation ([#3400](https://github.com/badlogic/pi-mono/pull/3400) by [@wirjo](https://github.com/wirjo))
+
+### Fixed
+
+- Fixed `openai-completions` `compat.requiresThinkingAsText` assistant replay to preserve text-part serialization and avoid same-model crashes when prior assistant messages contain both thinking and text ([#3387](https://github.com/badlogic/pi-mono/issues/3387))
+- Fixed Cloud Code Assist tool schemas to strip JSON Schema meta-declaration keys such as `$schema`, `$defs`, and `definitions` before sending OpenAPI `parameters`, avoiding provider validation failures for tool-enabled requests ([#3412](https://github.com/badlogic/pi-mono/pull/3412) by [@vladlearns](https://github.com/vladlearns))
 - Fixed non-vision model requests to replace user and tool-result image blocks with explicit text placeholders instead of silently dropping them during provider payload conversion ([#3429](https://github.com/badlogic/pi-mono/issues/3429))
-- Fixed OpenRouter Meta tests by switching `meta-llama/llama-4-maverick` to `meta-llama/llama-4-scout` to avoid type-check failures from model-catalog drift.
 - Fixed direct OpenAI Chat Completions requests to map `sessionId` and `cacheRetention` to OpenAI prompt caching fields, sending `prompt_cache_key` when caching is enabled and `prompt_cache_retention: "24h"` for direct `api.openai.com` requests with long retention ([#3426](https://github.com/badlogic/pi-mono/issues/3426))
 - Fixed OpenAI-compatible Chat Completions requests to optionally send aligned `session_id`, `x-client-request-id`, and `x-session-affinity` session-affinity headers from `sessionId` via `compat.sendSessionAffinityHeaders`, enabling cache-affinity routing for backends such as Fireworks ([#3430](https://github.com/badlogic/pi-mono/issues/3430))
+- Fixed direct Bedrock runtime client construction to pass `model.baseUrl` through as the SDK `endpoint`, restoring support for custom Bedrock endpoints such as VPC or proxy routes ([#3402](https://github.com/badlogic/pi-mono/pull/3402) by [@wirjo](https://github.com/wirjo))
 - Fixed OpenAI-compatible Chat Completions Anthropic-style prompt caching to apply `cache_control` markers to the system prompt, last tool definition, and last user/assistant text content via `compat.cacheControlFormat`, and enabled that compat for OpenCode/OpenCode Go Qwen 3.5/3.6 Plus models so prompt caching works there too ([#3392](https://github.com/badlogic/pi-mono/issues/3392))
 
 ## [0.67.68] - 2026-04-17

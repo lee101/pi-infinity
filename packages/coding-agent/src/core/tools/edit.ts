@@ -485,7 +485,3 @@ export function createEditToolDefinition(
 export function createEditTool(cwd: string, options?: EditToolOptions): AgentTool<typeof editSchema> {
 	return wrapToolDefinition(createEditToolDefinition(cwd, options));
 }
-
-/** Default edit tool using process.cwd() for backwards compatibility. */
-export const editToolDefinition = createEditToolDefinition(process.cwd());
-export const editTool = createEditTool(process.cwd());

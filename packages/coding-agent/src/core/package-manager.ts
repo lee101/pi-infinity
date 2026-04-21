@@ -24,6 +24,7 @@ import type { PackageSource, SettingsManager } from "./settings-manager.js";
 
 const NETWORK_TIMEOUT_MS = 10000;
 const UPDATE_CHECK_CONCURRENCY = 4;
+const GIT_UPDATE_CONCURRENCY = 4;
 
 function isOfflineModeEnabled(): boolean {
 	const value = process.env.PI_OFFLINE;
@@ -115,6 +116,21 @@ type LocalSource = {
 };
 
 type ParsedSource = NpmSource | GitSource | LocalSource;
+
+type InstalledSourceScope = Exclude<SourceScope, "temporary">;
+
+interface ConfiguredUpdateSource {
+	source: string;
+	scope: InstalledSourceScope;
+}
+
+interface NpmUpdateTarget extends ConfiguredUpdateSource {
+	parsed: NpmSource;
+}
+
+interface GitUpdateTarget extends ConfiguredUpdateSource {
+	parsed: GitSource;
+}
 
 interface PiManifest {
 	extensions?: string[];
@@ -970,18 +986,19 @@ export class DefaultPackageManager implements PackageManager {
 		const projectSettings = this.settingsManager.getProjectSettings();
 		const identity = source ? this.getPackageIdentity(source) : undefined;
 		let matched = false;
+		const updateSources: ConfiguredUpdateSource[] = [];
 
 		for (const pkg of globalSettings.packages ?? []) {
 			const sourceStr = typeof pkg === "string" ? pkg : pkg.source;
 			if (identity && this.getPackageIdentity(sourceStr, "user") !== identity) continue;
 			matched = true;
-			await this.updateSourceForScope(sourceStr, "user");
+			updateSources.push({ source: sourceStr, scope: "user" });
 		}
 		for (const pkg of projectSettings.packages ?? []) {
 			const sourceStr = typeof pkg === "string" ? pkg : pkg.source;
 			if (identity && this.getPackageIdentity(sourceStr, "project") !== identity) continue;
 			matched = true;
-			await this.updateSourceForScope(sourceStr, "project");
+			updateSources.push({ source: sourceStr, scope: "project" });
 		}
 
 		if (source && !matched) {
@@ -992,34 +1009,106 @@ export class DefaultPackageManager implements PackageManager {
 				]),
 			);
 		}
+
+		await this.updateConfiguredSources(updateSources);
 	}
 
-	private async updateSourceForScope(source: string, scope: SourceScope): Promise<void> {
-		if (isOfflineModeEnabled()) {
+	private async updateConfiguredSources(sources: ConfiguredUpdateSource[]): Promise<void> {
+		if (isOfflineModeEnabled() || sources.length === 0) {
 			return;
 		}
-		const parsed = this.parseSource(source);
-		if (parsed.type === "npm") {
-			if (parsed.pinned) return;
-			await this.withProgress("update", source, `Updating ${source}...`, async () => {
-				await this.installNpm(
-					{
-						...parsed,
-						spec: `${parsed.name}@latest`,
-					},
-					scope,
-					false,
-				);
-			});
+
+		const npmCandidates: NpmUpdateTarget[] = [];
+		const gitCandidates: GitUpdateTarget[] = [];
+
+		for (const entry of sources) {
+			const parsed = this.parseSource(entry.source);
+			if (parsed.type === "local" || parsed.pinned) {
+				continue;
+			}
+			if (parsed.type === "npm") {
+				npmCandidates.push({ ...entry, parsed });
+				continue;
+			}
+			gitCandidates.push({ ...entry, parsed });
+		}
+
+		const npmCheckTasks = npmCandidates.map((entry) => async () => ({
+			entry,
+			shouldUpdate: await this.shouldUpdateNpmSource(entry.parsed, entry.scope),
+		}));
+		const npmCheckResults = await this.runWithConcurrency(npmCheckTasks, UPDATE_CHECK_CONCURRENCY);
+		const userNpmUpdates: NpmUpdateTarget[] = [];
+		const projectNpmUpdates: NpmUpdateTarget[] = [];
+		for (const result of npmCheckResults) {
+			if (!result.shouldUpdate) {
+				continue;
+			}
+			if (result.entry.scope === "user") {
+				userNpmUpdates.push(result.entry);
+			} else {
+				projectNpmUpdates.push(result.entry);
+			}
+		}
+
+		const tasks: Promise<void>[] = [];
+		if (userNpmUpdates.length > 0) {
+			tasks.push(this.updateNpmBatch(userNpmUpdates, "user"));
+		}
+		if (projectNpmUpdates.length > 0) {
+			tasks.push(this.updateNpmBatch(projectNpmUpdates, "project"));
+		}
+		if (gitCandidates.length > 0) {
+			const gitTasks = gitCandidates.map(
+				(entry) => async () =>
+					this.withProgress("update", entry.source, `Updating ${entry.source}...`, async () => {
+						await this.updateGit(entry.parsed, entry.scope);
+					}),
+			);
+			tasks.push(this.runWithConcurrency(gitTasks, GIT_UPDATE_CONCURRENCY).then(() => {}));
+		}
+
+		await Promise.all(tasks);
+	}
+
+	private async shouldUpdateNpmSource(source: NpmSource, scope: InstalledSourceScope): Promise<boolean> {
+		const installedPath = this.getNpmInstallPath(source, scope);
+		const installedVersion = existsSync(installedPath) ? this.getInstalledNpmVersion(installedPath) : undefined;
+		if (!installedVersion) {
+			return true;
+		}
+
+		try {
+			const latestVersion = await this.getLatestNpmVersion(source.name);
+			return latestVersion !== installedVersion;
+		} catch {
+			// Preserve existing update behavior when version lookup fails.
+			return true;
+		}
+	}
+
+	private async updateNpmBatch(sources: NpmUpdateTarget[], scope: InstalledSourceScope): Promise<void> {
+		if (sources.length === 0) {
 			return;
 		}
-		if (parsed.type === "git") {
-			if (parsed.pinned) return;
-			await this.withProgress("update", source, `Updating ${source}...`, async () => {
-				await this.updateGit(parsed, scope);
-			});
+
+		const sourceLabel = sources.length === 1 ? sources[0].source : `${scope} npm packages`;
+		const message = sources.length === 1 ? `Updating ${sources[0].source}...` : `Updating ${scope} npm packages...`;
+		const specs = sources.map((entry) => `${entry.parsed.name}@latest`);
+
+		await this.withProgress("update", sourceLabel, message, async () => {
+			await this.installNpmBatch(specs, scope);
+		});
+	}
+
+	private async installNpmBatch(specs: string[], scope: InstalledSourceScope): Promise<void> {
+		if (scope === "user") {
+			await this.runNpmCommand(["install", "-g", ...specs]);
 			return;
 		}
+		const installRoot = this.getNpmInstallRoot(scope, false);
+		this.ensureNpmProject(installRoot);
+		await this.runNpmCommand(["install", ...specs, "--prefix", installRoot]);
 	}
 
 	async checkForAvailableUpdates(): Promise<PackageUpdate[]> {

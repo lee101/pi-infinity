@@ -300,6 +300,39 @@ describe("CombinedAutocompleteProvider", () => {
 			assert.ok(!values.some((value) => value === "@.git" || value.startsWith("@.git/")));
 		});
 
+		test("returns the same @ suggestions when the cwd path contains the query", async () => {
+			const normalBaseDir = join(rootDir, "cwd-normal");
+			const queryInPathBaseDir = join(rootDir, "cwd-plan-repro");
+			mkdirSync(normalBaseDir, { recursive: true });
+			mkdirSync(queryInPathBaseDir, { recursive: true });
+
+			const structure = {
+				dirs: ["packages/coding-agent/examples/extensions/plan-mode"],
+				files: {
+					"packages/coding-agent/examples/extensions/plan-mode/README.md": "readme",
+					"packages/pods/docs/plan.md": "plan",
+				},
+			};
+			setupFolder(normalBaseDir, structure);
+			setupFolder(queryInPathBaseDir, structure);
+
+			const query = "@plan";
+			const normalProvider = new CombinedAutocompleteProvider([], normalBaseDir, requireFdPath());
+			const queryInPathProvider = new CombinedAutocompleteProvider([], queryInPathBaseDir, requireFdPath());
+
+			const normalResult = await getSuggestions(normalProvider, [query], 0, query.length);
+			const queryInPathResult = await getSuggestions(queryInPathProvider, [query], 0, query.length);
+
+			const normalize = (result: Awaited<ReturnType<typeof getSuggestions>>) =>
+				(result?.items ?? []).map((item) => `${item.label} :: ${item.description ?? ""}`).sort();
+
+			assert.deepStrictEqual(normalize(queryInPathResult), normalize(normalResult));
+			assert.ok(
+				normalize(normalResult).includes("plan-mode/ :: packages/coding-agent/examples/extensions/plan-mode"),
+			);
+			assert.ok(normalize(normalResult).includes("plan.md :: packages/pods/docs/plan.md"));
+		});
+
 		test("continues autocomplete inside quoted @ paths", async () => {
 			setupFolder(baseDir, {
 				files: {

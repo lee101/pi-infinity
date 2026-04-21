@@ -114,10 +114,19 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
 		const config: BedrockRuntimeClientConfig = {
 			profile: options.profile,
 		};
+		const configuredRegion = getConfiguredBedrockRegion(options);
+		const hasConfiguredProfile = hasConfiguredBedrockProfile();
+		const endpointRegion = getStandardBedrockEndpointRegion(model.baseUrl);
+		const useExplicitEndpoint = shouldUseExplicitBedrockEndpoint(
+			model.baseUrl,
+			configuredRegion,
+			hasConfiguredProfile,
+		);
 
-		// Pass custom endpoint when the model has a non-default baseUrl.
-		// This enables VPC endpoints, proxy setups, and custom routing.
-		if (model.baseUrl) {
+		// Only pin standard AWS Bedrock runtime endpoints when no region/profile is configured.
+		// This preserves custom endpoints (VPC/proxy) from #3402 without forcing built-in
+		// catalog defaults such as us-east-1 to override AWS_REGION/AWS_PROFILE.
+		if (useExplicitEndpoint) {
 			config.endpoint = model.baseUrl;
 		}
 
@@ -130,10 +139,11 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
 			// Region resolution: explicit option > env vars > SDK default chain.
 			// When AWS_PROFILE is set, we leave region undefined so the SDK can
 			// resovle it from aws profile configs. Otherwise fall back to us-east-1.
-			const explicitRegion = options.region || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
-			if (explicitRegion) {
-				config.region = explicitRegion;
-			} else if (!process.env.AWS_PROFILE) {
+			if (configuredRegion) {
+				config.region = configuredRegion;
+			} else if (endpointRegion && useExplicitEndpoint) {
+				config.region = endpointRegion;
+			} else if (!hasConfiguredProfile) {
 				config.region = "us-east-1";
 			}
 
@@ -173,7 +183,8 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
 		} else {
 			// Non-Node environment (browser): fall back to us-east-1 since
 			// there's no config file resolution available.
-			config.region = options.region || "us-east-1";
+			config.region =
+				configuredRegion || (endpointRegion && useExplicitEndpoint ? endpointRegion : undefined) || "us-east-1";
 		}
 
 		if (useBearerToken) {
@@ -785,8 +796,51 @@ function mapStopReason(reason: string | undefined): StopReason {
 	}
 }
 
+function getConfiguredBedrockRegion(options: BedrockOptions): string | undefined {
+	if (typeof process === "undefined") {
+		return options.region;
+	}
+
+	return options.region || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || undefined;
+}
+
+function hasConfiguredBedrockProfile(): boolean {
+	if (typeof process === "undefined") {
+		return false;
+	}
+
+	return Boolean(process.env.AWS_PROFILE);
+}
+
+function getStandardBedrockEndpointRegion(baseUrl: string | undefined): string | undefined {
+	if (!baseUrl) {
+		return undefined;
+	}
+
+	try {
+		const { hostname } = new URL(baseUrl);
+		const match = hostname.toLowerCase().match(/^bedrock-runtime(?:-fips)?\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?$/);
+		return match?.[1];
+	} catch {
+		return undefined;
+	}
+}
+
+function shouldUseExplicitBedrockEndpoint(
+	baseUrl: string,
+	configuredRegion: string | undefined,
+	hasConfiguredProfile: boolean,
+): boolean {
+	const endpointRegion = getStandardBedrockEndpointRegion(baseUrl);
+	if (!endpointRegion) {
+		return true;
+	}
+
+	return !configuredRegion && !hasConfiguredProfile;
+}
+
 function isGovCloudBedrockTarget(model: Model<"bedrock-converse-stream">, options: BedrockOptions): boolean {
-	const region = options.region || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
+	const region = getConfiguredBedrockRegion(options);
 	if (region?.toLowerCase().startsWith("us-gov-")) {
 		return true;
 	}

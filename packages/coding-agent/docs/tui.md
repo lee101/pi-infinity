@@ -741,11 +741,16 @@ Customize the inline working indicator shown while pi is streaming a response.
 
 ```typescript
 // Static indicator
-ctx.ui.setWorkingIndicator({ frames: ["●"] });
+ctx.ui.setWorkingIndicator({ frames: [ctx.ui.theme.fg("accent", "●")] });
 
 // Custom animated indicator
 ctx.ui.setWorkingIndicator({
-  frames: ["·", "•", "●", "•"],
+  frames: [
+    ctx.ui.theme.fg("dim", "·"),
+    ctx.ui.theme.fg("muted", "•"),
+    ctx.ui.theme.fg("accent", "●"),
+    ctx.ui.theme.fg("muted", "•"),
+  ],
   intervalMs: 120,
 });
 
@@ -756,7 +761,7 @@ ctx.ui.setWorkingIndicator({ frames: [] });
 ctx.ui.setWorkingIndicator();
 ```
 
-This only affects the normal streaming working indicator. Compaction and retry loaders keep their built-in styling.
+This only affects the normal streaming working indicator. Compaction and retry loaders keep their built-in styling. Custom frames are rendered verbatim, so extensions must add their own colors when needed.
 
 **Examples:** [working-indicator.ts](../examples/extensions/working-indicator.ts)
 

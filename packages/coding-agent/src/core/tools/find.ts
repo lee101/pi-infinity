@@ -368,7 +368,3 @@ export function createFindToolDefinition(
 export function createFindTool(cwd: string, options?: FindToolOptions): AgentTool<typeof findSchema> {
 	return wrapToolDefinition(createFindToolDefinition(cwd, options));
 }
-
-/** Default find tool using process.cwd() for backwards compatibility. */
-export const findToolDefinition = createFindToolDefinition(process.cwd());
-export const findTool = createFindTool(process.cwd());

@@ -10,6 +10,7 @@ import type { ResourceDiagnostic } from "../diagnostics.js";
 import type { KeybindingsConfig } from "../keybindings.js";
 import type { ModelRegistry } from "../model-registry.js";
 import type { SessionManager } from "../session-manager.js";
+import type { BuildSystemPromptOptions } from "../system-prompt.js";
 import type {
 	BeforeAgentStartEvent,
 	BeforeAgentStartEventResult,
@@ -44,6 +45,7 @@ import type {
 	SessionBeforeForkResult,
 	SessionBeforeSwitchResult,
 	SessionBeforeTreeResult,
+	SessionShutdownEvent,
 	ToolCallEvent,
 	ToolCallEventResult,
 	ToolResultEvent,
@@ -167,11 +169,12 @@ export type ShutdownHandler = () => void;
  * Helper function to emit session_shutdown event to extensions.
  * Returns true if the event was emitted, false if there were no handlers.
  */
-export async function emitSessionShutdownEvent(extensionRunner: ExtensionRunner): Promise<boolean> {
+export async function emitSessionShutdownEvent(
+	extensionRunner: ExtensionRunner,
+	event: SessionShutdownEvent,
+): Promise<boolean> {
 	if (extensionRunner.hasHandlers("session_shutdown")) {
-		await extensionRunner.emit({
-			type: "session_shutdown",
-		});
+		await extensionRunner.emit(event);
 		return true;
 	}
 	return false;
@@ -789,6 +792,7 @@ export class ExtensionRunner {
 		prompt: string,
 		images: ImageContent[] | undefined,
 		systemPrompt: string,
+		systemPromptOptions: BuildSystemPromptOptions,
 	): Promise<BeforeAgentStartCombinedResult | undefined> {
 		const ctx = this.createContext();
 		const messages: NonNullable<BeforeAgentStartEventResult["message"]>[] = [];
@@ -806,6 +810,7 @@ export class ExtensionRunner {
 						prompt,
 						images,
 						systemPrompt: currentSystemPrompt,
+						systemPromptOptions,
 					};
 					const handlerResult = await handler(event, ctx);
 

@@ -67,6 +67,7 @@ import {
 	type TurnStartEvent,
 	wrapRegisteredTools,
 } from "./extensions/index.js";
+import { emitSessionShutdownEvent } from "./extensions/runner.js";
 import type { BashExecutionMessage, CustomMessage } from "./messages.js";
 import type { ModelRegistry } from "./model-registry.js";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.js";
@@ -76,7 +77,7 @@ import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader }
 import type { SettingsManager } from "./settings-manager.js";
 import type { SlashCommandInfo } from "./slash-commands.js";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.js";
-import { buildSystemPrompt } from "./system-prompt.js";
+import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.js";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.js";
 import { createAllToolDefinitions } from "./tools/index.js";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.js";
@@ -150,6 +151,8 @@ export interface AgentSessionConfig {
 	modelRegistry: ModelRegistry;
 	/** Initial active built-in tool names. Default: [read, bash, edit, write] */
 	initialActiveToolNames?: string[];
+	/** Optional allowlist of tool names. When provided, only these tool names are exposed. */
+	allowedToolNames?: string[];
 	/**
 	 * Override base tools (useful for custom runtimes).
 	 *
@@ -286,6 +289,7 @@ export class AgentSession {
 	private _cwd: string;
 	private _extensionRunnerRef?: { current?: ExtensionRunner };
 	private _initialActiveToolNames?: string[];
+	private _allowedToolNames?: Set<string>;
 	private _baseToolsOverride?: Record<string, AgentTool>;
 	private _sessionStartEvent: SessionStartEvent;
 	private _extensionUIContext?: ExtensionUIContext;
@@ -305,6 +309,7 @@ export class AgentSession {
 
 	// Base system prompt (without extension appends) - used to apply fresh appends each turn
 	private _baseSystemPrompt = "";
+	private _baseSystemPromptOptions!: BuildSystemPromptOptions;
 
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
@@ -317,6 +322,7 @@ export class AgentSession {
 		this._modelRegistry = config.modelRegistry;
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
+		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._autoNextSteps = config.autoNextSteps ?? false;
 		this._autoNextIdea = config.autoNextIdea ?? false;
@@ -915,7 +921,7 @@ export class AgentSession {
 		const loadedSkills = this._resourceLoader.getSkills().skills;
 		const loadedContextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
 
-		return buildSystemPrompt({
+		this._baseSystemPromptOptions = {
 			cwd: this._cwd,
 			skills: loadedSkills,
 			contextFiles: loadedContextFiles,
@@ -924,7 +930,8 @@ export class AgentSession {
 			selectedTools: validToolNames,
 			toolSnippets,
 			promptGuidelines,
-		});
+		};
+		return buildSystemPrompt(this._baseSystemPromptOptions);
 	}
 
 	// =========================================================================
@@ -1057,6 +1064,7 @@ export class AgentSession {
 				expandedText,
 				currentImages,
 				this._baseSystemPrompt,
+				this._baseSystemPromptOptions,
 			);
 			// Add all custom messages from extensions
 			if (result?.messages) {
@@ -2234,6 +2242,8 @@ export class AgentSession {
 	private _refreshToolRegistry(options?: { activeToolNames?: string[]; includeAllExtensionTools?: boolean }): void {
 		const previousRegistryNames = new Set(this._toolRegistry.keys());
 		const previousActiveToolNames = this.getActiveToolNames();
+		const allowedToolNames = this._allowedToolNames;
+		const isAllowedTool = (name: string): boolean => !allowedToolNames || allowedToolNames.has(name);
 
 		const registeredTools = this._extensionRunner.getAllRegisteredTools();
 		const allCustomTools = [
@@ -2242,15 +2252,17 @@ export class AgentSession {
 				definition,
 				sourceInfo: createSyntheticSourceInfo(`<sdk:${definition.name}>`, { source: "sdk" }),
 			})),
-		];
+		].filter((tool) => isAllowedTool(tool.definition.name));
 		const definitionRegistry = new Map<string, ToolDefinitionEntry>(
-			Array.from(this._baseToolDefinitions.entries()).map(([name, definition]) => [
-				name,
-				{
-					definition,
-					sourceInfo: createSyntheticSourceInfo(`<builtin:${name}>`, { source: "builtin" }),
-				},
-			]),
+			Array.from(this._baseToolDefinitions.entries())
+				.filter(([name]) => isAllowedTool(name))
+				.map(([name, definition]) => [
+					name,
+					{
+						definition,
+						sourceInfo: createSyntheticSourceInfo(`<builtin:${name}>`, { source: "builtin" }),
+					},
+				]),
 		);
 		for (const tool of allCustomTools) {
 			definitionRegistry.set(tool.definition.name, {
@@ -2278,10 +2290,12 @@ export class AgentSession {
 		const runner = this._extensionRunner;
 		const wrappedExtensionTools = wrapRegisteredTools(allCustomTools, runner);
 		const wrappedBuiltInTools = wrapRegisteredTools(
-			Array.from(this._baseToolDefinitions.values()).map((definition) => ({
-				definition,
-				sourceInfo: createSyntheticSourceInfo(`<builtin:${definition.name}>`, { source: "builtin" }),
-			})),
+			Array.from(this._baseToolDefinitions.values())
+				.filter((definition) => isAllowedTool(definition.name))
+				.map((definition) => ({
+					definition,
+					sourceInfo: createSyntheticSourceInfo(`<builtin:${definition.name}>`, { source: "builtin" }),
+				})),
 			runner,
 		);
 
@@ -2291,11 +2305,17 @@ export class AgentSession {
 		}
 		this._toolRegistry = toolRegistry;
 
-		const nextActiveToolNames = options?.activeToolNames
-			? [...options.activeToolNames]
-			: [...previousActiveToolNames];
+		const nextActiveToolNames = (
+			options?.activeToolNames ? [...options.activeToolNames] : [...previousActiveToolNames]
+		).filter((name) => isAllowedTool(name));
 
-		if (options?.includeAllExtensionTools) {
+		if (allowedToolNames) {
+			for (const toolName of this._toolRegistry.keys()) {
+				if (allowedToolNames.has(toolName)) {
+					nextActiveToolNames.push(toolName);
+				}
+			}
+		} else if (options?.includeAllExtensionTools) {
 			for (const tool of wrappedExtensionTools) {
 				nextActiveToolNames.push(tool.name);
 			}
@@ -2317,6 +2337,7 @@ export class AgentSession {
 	}): void {
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
+		const shellPath = this.settingsManager.getShellPath();
 		const baseToolDefinitions = this._baseToolsOverride
 			? Object.fromEntries(
 					Object.entries(this._baseToolsOverride).map(([name, tool]) => [
@@ -2326,7 +2347,7 @@ export class AgentSession {
 				)
 			: createAllToolDefinitions(this._cwd, {
 					read: { autoResizeImages },
-					bash: { commandPrefix: shellCommandPrefix },
+					bash: { commandPrefix: shellCommandPrefix, shellPath },
 				});
 
 		this._baseToolDefinitions = new Map(
@@ -2365,7 +2386,7 @@ export class AgentSession {
 
 	async reload(): Promise<void> {
 		const previousFlagValues = this._extensionRunner.getFlagValues();
-		await this._extensionRunner.emit({ type: "session_shutdown" });
+		await emitSessionShutdownEvent(this._extensionRunner, { type: "session_shutdown", reason: "reload" });
 		await this.settingsManager.reload();
 		resetApiProviders();
 		await this._resourceLoader.reload();
@@ -2596,13 +2617,14 @@ export class AgentSession {
 
 		// Apply command prefix if configured (e.g., "shopt -s expand_aliases" for alias support)
 		const prefix = this.settingsManager.getShellCommandPrefix();
+		const shellPath = this.settingsManager.getShellPath();
 		const resolvedCommand = prefix ? `${prefix}\n${command}` : command;
 
 		try {
 			const result = await executeBashWithOperations(
 				resolvedCommand,
 				this.sessionManager.getCwd(),
-				options?.operations ?? createLocalBashOperations(),
+				options?.operations ?? createLocalBashOperations({ shellPath }),
 				{
 					onChunk,
 					signal: this._bashAbortController.signal,

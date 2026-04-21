@@ -1,6 +1,6 @@
 import { Box, type Component, Container, getCapabilities, Image, Spacer, Text, type TUI } from "@mariozechner/pi-tui";
 import type { ToolDefinition, ToolRenderContext } from "../../../core/extensions/types.js";
-import { allToolDefinitions } from "../../../core/tools/index.js";
+import { createAllToolDefinitions, type ToolName } from "../../../core/tools/index.js";
 import { getTextOutput as getRenderedTextOutput } from "../../../core/tools/render-utils.js";
 import { convertToPng } from "../../../utils/image-convert.js";
 import { theme } from "../theme/theme.js";
@@ -45,14 +45,14 @@ export class ToolExecutionComponent extends Container {
 		options: ToolExecutionOptions = {},
 		toolDefinition: ToolDefinition<any, any> | undefined,
 		ui: TUI,
-		cwd: string = process.cwd(),
+		cwd: string,
 	) {
 		super();
 		this.toolName = toolName;
 		this.toolCallId = toolCallId;
 		this.args = args;
 		this.toolDefinition = toolDefinition;
-		this.builtInToolDefinition = allToolDefinitions[toolName as keyof typeof allToolDefinitions];
+		this.builtInToolDefinition = createAllToolDefinitions(cwd)[toolName as ToolName];
 		this.showImages = options.showImages ?? true;
 		this.ui = ui;
 		this.cwd = cwd;

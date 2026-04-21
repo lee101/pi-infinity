@@ -227,7 +227,3 @@ export function createLsToolDefinition(
 export function createLsTool(cwd: string, options?: LsToolOptions): AgentTool<typeof lsSchema> {
 	return wrapToolDefinition(createLsToolDefinition(cwd, options));
 }
-
-/** Default ls tool using process.cwd() for backwards compatibility. */
-export const lsToolDefinition = createLsToolDefinition(process.cwd());
-export const lsTool = createLsTool(process.cwd());

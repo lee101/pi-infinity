@@ -57,6 +57,7 @@ import type {
 } from "../session-manager.js";
 import type { SlashCommandInfo } from "../slash-commands.js";
 import type { SourceInfo } from "../source-info.js";
+import type { BuildSystemPromptOptions } from "../system-prompt.js";
 import type { BashOperations } from "../tools/bash.js";
 import type { EditToolDetails } from "../tools/edit.js";
 import type {
@@ -75,6 +76,7 @@ import type {
 } from "../tools/index.js";
 
 export type { ExecOptions, ExecResult } from "../exec.js";
+export type { BuildSystemPromptOptions } from "../system-prompt.js";
 export type { AgentToolResult, AgentToolUpdateCallback, ToolExecutionMode };
 export type { AppKeybinding, KeybindingsManager } from "../keybindings.js";
 
@@ -104,7 +106,7 @@ export type TerminalInputHandler = (data: string) => { consume?: boolean; data?:
 
 /** Working indicator configuration for the interactive streaming loader. */
 export interface WorkingIndicatorOptions {
-	/** Animation frames. Use an empty array to hide the indicator entirely. */
+	/** Animation frames. Use an empty array to hide the indicator entirely. Custom frames are rendered verbatim. */
 	frames?: string[];
 	/** Frame interval in milliseconds for animated indicators. */
 	intervalMs?: number;
@@ -142,6 +144,7 @@ export interface ExtensionUIContext {
 	 * - Omit the argument to restore the default animated spinner.
 	 * - Use `frames: ["●"]` for a static indicator.
 	 * - Use `frames: []` to hide the indicator entirely.
+	 * - Custom frames are rendered as provided, so extensions must add their own colors.
 	 */
 	setWorkingIndicator(options?: WorkingIndicatorOptions): void;
 
@@ -509,9 +512,12 @@ export interface SessionCompactEvent {
 	fromExtension: boolean;
 }
 
-/** Fired on graceful process shutdown paths such as Ctrl+C, Ctrl+D, SIGHUP, and SIGTERM. */
+/** Fired before an extension runtime is torn down due to quit, reload, or session replacement. */
 export interface SessionShutdownEvent {
 	type: "session_shutdown";
+	reason: "quit" | "reload" | "new" | "resume" | "fork";
+	/** Destination session file when shutting down due to session replacement. */
+	targetSessionFile?: string;
 }
 
 /** Preparation data for tree navigation */
@@ -581,9 +587,14 @@ export interface AfterProviderResponseEvent {
 /** Fired after user submits prompt but before agent loop. */
 export interface BeforeAgentStartEvent {
 	type: "before_agent_start";
+	/** The raw user prompt text (after expansion). */
 	prompt: string;
+	/** Images attached to the user prompt, if any. */
 	images?: ImageContent[];
+	/** The fully assembled system prompt string. */
 	systemPrompt: string;
+	/** Structured options used to build the system prompt. Extensions can inspect this to understand what Pi loaded without re-discovering resources. */
+	systemPromptOptions: BuildSystemPromptOptions;
 }
 
 /** Fired when an agent loop starts */

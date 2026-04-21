@@ -144,7 +144,7 @@ export class FileSettingsStorage implements SettingsStorage {
 	private globalSettingsPath: string;
 	private projectSettingsPath: string;
 
-	constructor(cwd: string = process.cwd(), agentDir: string = getAgentDir()) {
+	constructor(cwd: string, agentDir: string) {
 		this.globalSettingsPath = join(agentDir, "settings.json");
 		this.projectSettingsPath = join(cwd, CONFIG_DIR_NAME, "settings.json");
 	}
@@ -256,7 +256,7 @@ export class SettingsManager {
 	}
 
 	/** Create a SettingsManager that loads from files */
-	static create(cwd: string = process.cwd(), agentDir: string = getAgentDir()): SettingsManager {
+	static create(cwd: string, agentDir: string = getAgentDir()): SettingsManager {
 		const storage = new FileSettingsStorage(cwd, agentDir);
 		return SettingsManager.fromStorage(storage);
 	}

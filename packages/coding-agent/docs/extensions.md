@@ -151,7 +151,7 @@ Node.js built-ins (`node:fs`, `node:path`, etc.) are also available.
 
 ## Writing an Extension
 
-An extension exports a default function that receives `ExtensionAPI`:
+An extension exports a default factory function that receives `ExtensionAPI`. The factory can be synchronous or asynchronous:
 
 ```typescript
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -175,6 +175,45 @@ export default function (pi: ExtensionAPI) {
 ```
 
 Extensions are loaded via [jiti](https://github.com/unjs/jiti), so TypeScript works without compilation.
+
+If the factory returns a `Promise`, pi awaits it before continuing startup. That means async initialization completes before `session_start`, before `resources_discover`, and before provider registrations queued via `pi.registerProvider()` are flushed.
+
+### Async factory functions
+
+Use an async factory for one-time startup work such as fetching remote configuration or dynamically discovering available models.
+
+```typescript
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+
+export default async function (pi: ExtensionAPI) {
+  const response = await fetch("http://localhost:1234/v1/models");
+  const payload = (await response.json()) as {
+    data: Array<{
+      id: string;
+      name?: string;
+      context_window?: number;
+      max_tokens?: number;
+    }>;
+  };
+
+  pi.registerProvider("local-openai", {
+    baseUrl: "http://localhost:1234/v1",
+    apiKey: "LOCAL_OPENAI_API_KEY",
+    api: "openai-completions",
+    models: payload.data.map((model) => ({
+      id: model.id,
+      name: model.name ?? model.id,
+      reasoning: false,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: model.context_window ?? 128000,
+      maxTokens: model.max_tokens ?? 4096,
+    })),
+  });
+}
+```
+
+This pattern makes the fetched models available during normal startup and to `pi --list-models`.
 
 ### Extension Styles
 
@@ -407,10 +446,12 @@ pi.on("session_tree", async (event, ctx) => {
 
 #### session_shutdown
 
-Fired on exit (Ctrl+C, Ctrl+D, SIGHUP, SIGTERM).
+Fired before an extension runtime is torn down.
 
 ```typescript
-pi.on("session_shutdown", async (_event, ctx) => {
+pi.on("session_shutdown", async (event, ctx) => {
+  // event.reason - "quit" | "reload" | "new" | "resume" | "fork"
+  // event.targetSessionFile - destination session for session replacement flows
   // Cleanup, save state, etc.
 });
 ```
@@ -426,6 +467,15 @@ pi.on("before_agent_start", async (event, ctx) => {
   // event.prompt - user's prompt text
   // event.images - attached images (if any)
   // event.systemPrompt - current system prompt
+  // event.systemPromptOptions - structured options used to build the system prompt
+  //   .customPrompt - any custom system prompt (from --system-prompt, SYSTEM.md, or custom templates)
+  //   .selectedTools - tools currently active in the prompt
+  //   .toolSnippets - one-line descriptions for each tool
+  //   .promptGuidelines - custom guideline bullets
+  //   .appendSystemPrompt - text from --append-system-prompt flags
+  //   .cwd - working directory
+  //   .contextFiles - AGENTS.md files and other loaded context files
+  //   .skills - loaded skills
 
   return {
     // Inject a persistent message (stored in session, sent to LLM)
@@ -439,6 +489,8 @@ pi.on("before_agent_start", async (event, ctx) => {
   };
 });
 ```
+
+The `systemPromptOptions` field gives extensions access to the same structured data Pi uses to build the system prompt. This lets you inspect what Pi has loaded — custom prompts, guidelines, tool snippets, context files, skills — without re-discovering resources or re-parsing flags. Use it when your extension needs to make deep, informed changes to the system prompt while respecting user-provided configuration.
 
 #### agent_start / agent_end
 
@@ -1053,6 +1105,8 @@ Use `pi.setActiveTools()` to enable or disable tools (including dynamically adde
 
 Use `promptSnippet` to opt a custom tool into a one-line entry in `Available tools`, and `promptGuidelines` to append tool-specific bullets to the default `Guidelines` section when the tool is active.
 
+**Important:** `promptGuidelines` bullets are appended flat to the `Guidelines` section with no tool name prefix. Each guideline must name the tool it refers to — avoid "Use this tool when..." because the LLM cannot tell which tool "this" means. Write "Use my_tool when..." instead.
+
 See [dynamic-tools.ts](../examples/extensions/dynamic-tools.ts) for a full example.
 
 ```typescript
@@ -1064,7 +1118,7 @@ pi.registerTool({
   label: "My Tool",
   description: "What this tool does",
   promptSnippet: "Summarize or transform text according to action",
-  promptGuidelines: ["Use this tool when the user asks to summarize previously generated text."],
+  promptGuidelines: ["Use my_tool when the user asks to summarize previously generated text."],
   parameters: Type.Object({
     action: StringEnum(["list", "add"] as const),
     text: Type.Optional(Type.String()),
@@ -1371,6 +1425,8 @@ Register or override a model provider dynamically. Useful for proxies, custom en
 
 Calls made during the extension factory function are queued and applied once the runner initialises. Calls made after that — for example from a command handler following a user setup flow — take effect immediately without requiring a `/reload`.
 
+If you need to discover models from a remote endpoint, prefer an async extension factory over deferring the fetch to `session_start`. pi waits for the factory before startup continues, so the registered models are available immediately, including to `pi --list-models`.
+
 ```typescript
 // Register a new provider with custom models
 pi.registerProvider("my-proxy", {
@@ -1488,6 +1544,8 @@ Use `promptSnippet` for a short one-line entry in the `Available tools` section 
 
 Use `promptGuidelines` to add tool-specific bullets to the default system prompt `Guidelines` section. These bullets are included only while the tool is active (for example, after `pi.setActiveTools([...])`).
 
+**Important:** `promptGuidelines` bullets are appended flat to the `Guidelines` section with no tool name prefix or grouping. Each guideline must name the tool it refers to — avoid "Use this tool when..." because the LLM cannot tell which tool "this" means. Write "Use my_tool when..." instead.
+
 Note: Some models are idiots and include the @ prefix in tool path arguments. Built-in tools strip a leading @ before resolving paths. If your custom tool accepts a path, normalize a leading @ as well.
 
 If your custom tool mutates files, use `withFileMutationQueue()` so it participates in the same per-file queue as built-in `edit` and `write`. This matters because tool calls run in parallel by default. Without the queue, two tools can read the same old file contents, compute different updates, and then whichever write lands last overwrites the other.
@@ -1533,7 +1591,7 @@ pi.registerTool({
   description: "What this tool does (shown to LLM)",
   promptSnippet: "List or add items in the project todo list",
   promptGuidelines: [
-    "Use this tool for todo planning instead of direct file edits when the user asks for a task list."
+    "Use my_tool for todo planning instead of direct file edits when the user asks for a task list."
   ],
   parameters: Type.Object({
     action: StringEnum(["list", "add"] as const),  // Use StringEnum for Google compatibility
@@ -2008,8 +2066,16 @@ ctx.ui.setWorkingMessage("Thinking deeply...");
 ctx.ui.setWorkingMessage();  // Restore default
 
 // Working indicator (shown during streaming)
-ctx.ui.setWorkingIndicator({ frames: ["●"] });  // Static dot
-ctx.ui.setWorkingIndicator({ frames: ["·", "•", "●", "•"], intervalMs: 120 });
+ctx.ui.setWorkingIndicator({ frames: [ctx.ui.theme.fg("accent", "●")] });  // Static dot
+ctx.ui.setWorkingIndicator({
+  frames: [
+    ctx.ui.theme.fg("dim", "·"),
+    ctx.ui.theme.fg("muted", "•"),
+    ctx.ui.theme.fg("accent", "●"),
+    ctx.ui.theme.fg("muted", "•"),
+  ],
+  intervalMs: 120,
+});
 ctx.ui.setWorkingIndicator({ frames: [] });  // Hide indicator
 ctx.ui.setWorkingIndicator();  // Restore default spinner
 
@@ -2056,6 +2122,8 @@ if (!result.success) {
 ctx.ui.setTheme(lightTheme!);  // Or switch by Theme object
 ctx.ui.theme.fg("accent", "styled text");  // Access current theme
 ```
+
+Custom working-indicator frames are rendered verbatim. If you want colors, add them to the frame strings yourself, for example with `ctx.ui.theme.fg(...)`.
 
 ### Custom Components
 
@@ -2269,6 +2337,7 @@ All examples in [examples/extensions/](../examples/extensions/).
 | `provider-payload.ts` | Inspect payloads and provider response headers | `on("before_provider_request")`, `on("after_provider_response")` |
 | `system-prompt-header.ts` | Display system prompt info | `on("agent_start")`, `getSystemPrompt` |
 | `claude-rules.ts` | Load rules from files | `on("session_start")`, `on("before_agent_start")` |
+| `prompt-customizer.ts` | Add context-aware tool guidance using `systemPromptOptions` | `on("before_agent_start")`, `BuildSystemPromptOptions` |
 | `file-trigger.ts` | File watcher triggers messages | `sendMessage` |
 | **Compaction & Sessions** |||
 | `custom-compaction.ts` | Custom compaction summary | `on("session_before_compact")` |

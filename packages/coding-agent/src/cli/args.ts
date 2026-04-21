@@ -6,7 +6,6 @@ import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 import chalk from "chalk";
 import { APP_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR } from "../config.js";
 import type { ExtensionFlag } from "../core/extensions/types.js";
-import { allTools, type ToolName } from "../core/tools/index.js";
 
 export type Mode = "text" | "json" | "rpc";
 
@@ -27,7 +26,7 @@ export interface Args {
 	fork?: string;
 	sessionDir?: string;
 	models?: string[];
-	tools?: ToolName[];
+	tools?: string[];
 	noTools?: boolean;
 	extensions?: string[];
 	noExtensions?: boolean;
@@ -106,19 +105,10 @@ export function parseArgs(args: string[]): Args {
 		} else if (arg === "--no-tools") {
 			result.noTools = true;
 		} else if (arg === "--tools" && i + 1 < args.length) {
-			const toolNames = args[++i].split(",").map((s) => s.trim());
-			const validTools: ToolName[] = [];
-			for (const name of toolNames) {
-				if (name in allTools) {
-					validTools.push(name as ToolName);
-				} else {
-					result.diagnostics.push({
-						type: "warning",
-						message: `Unknown tool "${name}". Valid tools: ${Object.keys(allTools).join(", ")}`,
-					});
-				}
-			}
-			result.tools = validTools;
+			result.tools = args[++i]
+				.split(",")
+				.map((s) => s.trim())
+				.filter((name) => name.length > 0);
 		} else if (arg === "--thinking" && i + 1 < args.length) {
 			const level = args[++i];
 			if (isValidThinkingLevel(level)) {
@@ -237,9 +227,9 @@ ${chalk.bold("Options:")}
   --no-session                   Don't save session (ephemeral)
   --models <patterns>            Comma-separated model patterns for Ctrl+P cycling
                                  Supports globs (anthropic/*, *sonnet*) and fuzzy matching
-  --no-tools                     Disable all built-in tools
-  --tools <tools>                Comma-separated list of tools to enable (default: read,bash,edit,write)
-                                 Available: read, bash, edit, write, grep, find, ls
+  --no-tools                     Disable all tools by default (built-in and extension)
+  --tools <tools>                Comma-separated allowlist of tool names to enable
+                                 Applies to built-in and extension tools
   --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh
   --extension, -e <path>         Load an extension file (can be used multiple times)
   --no-extensions, -ne           Disable extension discovery (explicit -e paths still work)
@@ -346,7 +336,7 @@ ${chalk.bold("Environment Variables:")}
   PI_SHARE_VIEWER_URL              - Base URL for /share command (default: https://pi.dev/session/)
   PI_AI_ANTIGRAVITY_VERSION        - Override Antigravity User-Agent version (e.g., 1.23.0)
 
-${chalk.bold("Available Tools (default: read, bash, edit, write):")}
+${chalk.bold("Built-in Tool Names:")}
   read   - Read file contents
   bash   - Execute bash commands
   edit   - Edit files with find/replace

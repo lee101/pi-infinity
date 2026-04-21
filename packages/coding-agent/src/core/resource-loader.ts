@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import chalk from "chalk";
-import { CONFIG_DIR_NAME, getAgentDir } from "../config.js";
+import { CONFIG_DIR_NAME } from "../config.js";
 import { loadThemeFromPath, type Theme } from "../modes/interactive/theme/theme.js";
 import type { ResourceDiagnostic } from "./diagnostics.js";
 
@@ -73,11 +73,12 @@ function loadContextFileFromDir(dir: string): { path: string; content: string } 
 	return null;
 }
 
-export function loadProjectContextFiles(
-	options: { cwd?: string; agentDir?: string } = {},
-): Array<{ path: string; content: string }> {
-	const resolvedCwd = options.cwd ?? process.cwd();
-	const resolvedAgentDir = options.agentDir ?? getAgentDir();
+export function loadProjectContextFiles(options: {
+	cwd: string;
+	agentDir: string;
+}): Array<{ path: string; content: string }> {
+	const resolvedCwd = options.cwd;
+	const resolvedAgentDir = options.agentDir;
 
 	const contextFiles: Array<{ path: string; content: string }> = [];
 	const seenPaths = new Set<string>();
@@ -113,8 +114,8 @@ export function loadProjectContextFiles(
 }
 
 export interface DefaultResourceLoaderOptions {
-	cwd?: string;
-	agentDir?: string;
+	cwd: string;
+	agentDir: string;
 	settingsManager?: SettingsManager;
 	eventBus?: EventBus;
 	additionalExtensionPaths?: string[];
@@ -204,8 +205,8 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private lastThemePaths: string[];
 
 	constructor(options: DefaultResourceLoaderOptions) {
-		this.cwd = options.cwd ?? process.cwd();
-		this.agentDir = options.agentDir ?? getAgentDir();
+		this.cwd = options.cwd;
+		this.agentDir = options.agentDir;
 		this.settingsManager = options.settingsManager ?? SettingsManager.create(this.cwd, this.agentDir);
 		this.eventBus = options.eventBus ?? createEventBus();
 		this.packageManager = new DefaultPackageManager({

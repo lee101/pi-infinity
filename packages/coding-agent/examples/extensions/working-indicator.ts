@@ -20,31 +20,49 @@ import type { ExtensionAPI, ExtensionContext, WorkingIndicatorOptions } from "@m
 
 type WorkingIndicatorMode = "dot" | "none" | "pulse" | "spinner" | "default";
 
-const SPINNER_INDICATOR: WorkingIndicatorOptions = {
-	frames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
-	intervalMs: 80,
-};
-const DOT_INDICATOR: WorkingIndicatorOptions = {
-	frames: ["●"],
-};
-const PULSE_INDICATOR: WorkingIndicatorOptions = {
-	frames: ["·", "•", "●", "•"],
-	intervalMs: 120,
-};
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const PASTEL_RAINBOW = [
+	"\x1b[38;2;255;179;186m",
+	"\x1b[38;2;255;223;186m",
+	"\x1b[38;2;255;255;186m",
+	"\x1b[38;2;186;255;201m",
+	"\x1b[38;2;186;225;255m",
+	"\x1b[38;2;218;186;255m",
+];
+const RESET_FG = "\x1b[39m";
 const HIDDEN_INDICATOR: WorkingIndicatorOptions = {
 	frames: [],
 };
 
+function colorize(text: string, color: string): string {
+	return `${color}${text}${RESET_FG}`;
+}
+
 function getIndicator(mode: WorkingIndicatorMode): WorkingIndicatorOptions | undefined {
 	switch (mode) {
 		case "dot":
-			return DOT_INDICATOR;
+			return {
+				frames: [colorize("●", PASTEL_RAINBOW[0])],
+			};
 		case "none":
 			return HIDDEN_INDICATOR;
 		case "pulse":
-			return PULSE_INDICATOR;
+			return {
+				frames: [
+					colorize("·", PASTEL_RAINBOW[0]),
+					colorize("•", PASTEL_RAINBOW[2]),
+					colorize("●", PASTEL_RAINBOW[4]),
+					colorize("•", PASTEL_RAINBOW[5]),
+				],
+				intervalMs: 120,
+			};
 		case "spinner":
-			return SPINNER_INDICATOR;
+			return {
+				frames: SPINNER_FRAMES.map((frame, index) =>
+					colorize(frame, PASTEL_RAINBOW[index % PASTEL_RAINBOW.length]!),
+				),
+				intervalMs: 80,
+			};
 		case "default":
 			return undefined;
 	}
@@ -66,7 +84,7 @@ function describeMode(mode: WorkingIndicatorMode): string {
 }
 
 export default function (pi: ExtensionAPI) {
-	let mode: WorkingIndicatorMode = "dot";
+	let mode: WorkingIndicatorMode = "spinner";
 
 	const applyIndicator = (ctx: ExtensionContext) => {
 		ctx.ui.setWorkingIndicator(getIndicator(mode));

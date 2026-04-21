@@ -271,7 +271,3 @@ export function createReadToolDefinition(
 export function createReadTool(cwd: string, options?: ReadToolOptions): AgentTool<typeof readSchema> {
 	return wrapToolDefinition(createReadToolDefinition(cwd, options));
 }
-
-/** Default read tool using process.cwd() for backwards compatibility. */
-export const readToolDefinition = createReadToolDefinition(process.cwd());
-export const readTool = createReadTool(process.cwd());

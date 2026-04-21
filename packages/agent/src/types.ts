@@ -30,7 +30,7 @@ export type StreamFn = (
  *
  * - "sequential": each tool call is prepared, executed, and finalized before the next one starts.
  * - "parallel": tool calls are prepared sequentially, then allowed tools execute concurrently.
- *   Final tool results are still emitted in assistant source order.
+ *   Final tool lifecycle and tool-result artifacts are emitted in tool completion order.
  */
 export type ToolExecutionMode = "sequential" | "parallel";
 
@@ -185,7 +185,8 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	/**
 	 * Tool execution mode.
 	 * - "sequential": execute tool calls one by one
-	 * - "parallel": preflight tool calls sequentially, then execute allowed tools concurrently
+	 * - "parallel": preflight tool calls sequentially, then execute allowed tools concurrently;
+	 *   final tool lifecycle and tool-result artifacts are emitted in tool completion order
 	 *
 	 * Default: "parallel"
 	 */

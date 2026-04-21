@@ -20,6 +20,7 @@ export class Loader extends Text {
 	private currentFrame = 0;
 	private intervalId: NodeJS.Timeout | null = null;
 	private ui: TUI | null = null;
+	private renderIndicatorVerbatim = false;
 
 	constructor(
 		ui: TUI,
@@ -55,7 +56,8 @@ export class Loader extends Text {
 	}
 
 	setIndicator(indicator?: LoaderIndicatorOptions): void {
-		this.frames = indicator?.frames ? [...indicator.frames] : [...DEFAULT_FRAMES];
+		this.renderIndicatorVerbatim = indicator !== undefined;
+		this.frames = indicator?.frames !== undefined ? [...indicator.frames] : [...DEFAULT_FRAMES];
 		this.intervalMs = indicator?.intervalMs && indicator.intervalMs > 0 ? indicator.intervalMs : DEFAULT_INTERVAL_MS;
 		this.currentFrame = 0;
 		this.start();
@@ -74,7 +76,8 @@ export class Loader extends Text {
 
 	private updateDisplay(): void {
 		const frame = this.frames[this.currentFrame] ?? "";
-		const indicator = frame.length > 0 ? `${this.spinnerColorFn(frame)} ` : "";
+		const renderedFrame = this.renderIndicatorVerbatim ? frame : this.spinnerColorFn(frame);
+		const indicator = frame.length > 0 ? `${renderedFrame} ` : "";
 		this.setText(`${indicator}${this.messageColorFn(this.message)}`);
 		if (this.ui) {
 			this.ui.requestRender();

@@ -112,7 +112,7 @@ describe("FooterDataProvider reftable branch detection", () => {
 		mkdirSync(nestedDir, { recursive: true });
 		process.chdir(nestedDir);
 
-		const provider = new FooterDataProvider();
+		const provider = new FooterDataProvider(nestedDir);
 		try {
 			expect(provider.getGitBranch()).toBe("main");
 			expect(vi.mocked(spawnSync)).not.toHaveBeenCalled();
@@ -125,7 +125,7 @@ describe("FooterDataProvider reftable branch detection", () => {
 		const repoDir = createPlainReftableRepo(tempDir);
 		process.chdir(repoDir);
 
-		const provider = new FooterDataProvider();
+		const provider = new FooterDataProvider(repoDir);
 		try {
 			expect(provider.getGitBranch()).toBe("main");
 			expect(vi.mocked(spawnSync)).toHaveBeenCalledWith(
@@ -146,7 +146,7 @@ describe("FooterDataProvider reftable branch detection", () => {
 		const { worktreeDir } = createReftableWorktree(tempDir);
 		process.chdir(worktreeDir);
 
-		const provider = new FooterDataProvider();
+		const provider = new FooterDataProvider(worktreeDir);
 		try {
 			expect(provider.getGitBranch()).toBe("main");
 		} finally {
@@ -159,7 +159,7 @@ describe("FooterDataProvider reftable branch detection", () => {
 		process.chdir(repoDir);
 		resolvedBranch = "";
 
-		const provider = new FooterDataProvider();
+		const provider = new FooterDataProvider(repoDir);
 		try {
 			expect(provider.getGitBranch()).toBe("detached");
 		} finally {
@@ -171,7 +171,7 @@ describe("FooterDataProvider reftable branch detection", () => {
 		const { worktreeDir, reftableDir } = createReftableWorktree(tempDir);
 		process.chdir(worktreeDir);
 
-		const provider = new FooterDataProvider();
+		const provider = new FooterDataProvider(worktreeDir);
 		try {
 			expect(provider.getGitBranch()).toBe("main");
 			vi.mocked(spawnSync).mockClear();
@@ -194,7 +194,7 @@ describe("FooterDataProvider reftable branch detection", () => {
 		const { worktreeDir, reftableDir } = createReftableWorktree(tempDir);
 		process.chdir(worktreeDir);
 
-		const provider = new FooterDataProvider();
+		const provider = new FooterDataProvider(worktreeDir);
 		try {
 			expect(provider.getGitBranch()).toBe("main");
 			vi.mocked(execFile).mockClear();
@@ -215,7 +215,7 @@ describe("FooterDataProvider reftable branch detection", () => {
 		const { worktreeDir, reftableDir } = createReftableWorktree(tempDir);
 		process.chdir(worktreeDir);
 
-		const provider = new FooterDataProvider();
+		const provider = new FooterDataProvider(worktreeDir);
 		try {
 			expect(provider.getGitBranch()).toBe("main");
 			resolvedBranch = "foo";

@@ -59,6 +59,8 @@ export default function (pi: ExtensionAPI) {
 }
 ```
 
+The extension factory can also be `async`. For dynamic model discovery, fetch and register models in the factory instead of `session_start`. pi waits for the factory before startup continues, so the provider is available during interactive startup and to `pi --list-models`.
+
 ## Override Existing Provider
 
 The simplest use case: redirect an existing provider through a proxy.
@@ -90,6 +92,41 @@ When only `baseUrl` and/or `headers` are provided (no `models`), all existing mo
 ## Register New Provider
 
 To add a completely new provider, specify `models` along with the required configuration.
+
+If the model list comes from a remote endpoint, use an async extension factory:
+
+```typescript
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+
+export default async function (pi: ExtensionAPI) {
+  const response = await fetch("http://localhost:1234/v1/models");
+  const payload = (await response.json()) as {
+    data: Array<{
+      id: string;
+      name?: string;
+      context_window?: number;
+      max_tokens?: number;
+    }>;
+  };
+
+  pi.registerProvider("local-openai", {
+    baseUrl: "http://localhost:1234/v1",
+    apiKey: "LOCAL_OPENAI_API_KEY",
+    api: "openai-completions",
+    models: payload.data.map((model) => ({
+      id: model.id,
+      name: model.name ?? model.id,
+      reasoning: false,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: model.context_window ?? 128000,
+      maxTokens: model.max_tokens ?? 4096,
+    })),
+  });
+}
+```
+
+This registers the fetched models before startup finishes.
 
 ```typescript
 pi.registerProvider("my-llm", {

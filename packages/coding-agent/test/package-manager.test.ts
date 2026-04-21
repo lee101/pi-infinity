@@ -1455,18 +1455,155 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 	});
 
 	describe("offline mode and network timeouts", () => {
-		it("should update project npm packages using @latest", async () => {
+		it("should update project npm packages using @latest when newer version is available", async () => {
+			const installedPath = join(tempDir, ".pinf", "npm", "node_modules", "example");
+			mkdirSync(installedPath, { recursive: true });
+			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
 			settingsManager.setProjectPackages(["npm:example"]);
 
+			const runCommandCaptureSpy = vi.spyOn(packageManager as any, "runCommandCapture").mockResolvedValue('"1.2.3"');
 			const runCommandSpy = vi.spyOn(packageManager as any, "runCommand").mockResolvedValue(undefined);
 
 			await packageManager.update("npm:example");
 
+			expect(runCommandCaptureSpy).toHaveBeenCalledWith(
+				"npm",
+				["view", "example", "version", "--json"],
+				expect.objectContaining({ cwd: tempDir, timeoutMs: expect.any(Number) }),
+			);
 			expect(runCommandSpy).toHaveBeenCalledWith(
 				"npm",
 				["install", "example@latest", "--prefix", join(tempDir, ".pinf", "npm")],
 				undefined,
 			);
+		});
+
+		it("should skip project npm update when installed version matches latest", async () => {
+			const installedPath = join(tempDir, ".pinf", "npm", "node_modules", "example");
+			mkdirSync(installedPath, { recursive: true });
+			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.2.3" }));
+			settingsManager.setProjectPackages(["npm:example"]);
+
+			const runCommandCaptureSpy = vi.spyOn(packageManager as any, "runCommandCapture").mockResolvedValue('"1.2.3"');
+			const runCommandSpy = vi.spyOn(packageManager as any, "runCommand").mockResolvedValue(undefined);
+
+			await packageManager.update("npm:example");
+
+			expect(runCommandCaptureSpy).toHaveBeenCalledWith(
+				"npm",
+				["view", "example", "version", "--json"],
+				expect.objectContaining({ cwd: tempDir, timeoutMs: expect.any(Number) }),
+			);
+			expect(runCommandSpy).not.toHaveBeenCalled();
+		});
+
+		it("should batch npm updates per scope and run git updates in parallel while skipping pinned and current packages", async () => {
+			vi.spyOn(packageManager as any, "getGlobalNpmRoot").mockReturnValue(join(agentDir, "node_modules"));
+
+			const userOldPath = join(agentDir, "node_modules", "user-old");
+			const userCurrentPath = join(agentDir, "node_modules", "user-current");
+			const userUnknownPath = join(agentDir, "node_modules", "user-unknown");
+			const projectOldPath = join(tempDir, ".pinf", "npm", "node_modules", "project-old");
+			const projectCurrentPath = join(tempDir, ".pinf", "npm", "node_modules", "project-current");
+			const installPaths = [userOldPath, userCurrentPath, userUnknownPath, projectOldPath, projectCurrentPath];
+			for (const installPath of installPaths) {
+				mkdirSync(installPath, { recursive: true });
+			}
+			writeFileSync(join(userOldPath, "package.json"), JSON.stringify({ name: "user-old", version: "1.0.0" }));
+			writeFileSync(
+				join(userCurrentPath, "package.json"),
+				JSON.stringify({ name: "user-current", version: "1.0.0" }),
+			);
+			writeFileSync(
+				join(userUnknownPath, "package.json"),
+				JSON.stringify({ name: "user-unknown", version: "1.0.0" }),
+			);
+			writeFileSync(join(projectOldPath, "package.json"), JSON.stringify({ name: "project-old", version: "1.0.0" }));
+			writeFileSync(
+				join(projectCurrentPath, "package.json"),
+				JSON.stringify({ name: "project-current", version: "1.0.0" }),
+			);
+
+			settingsManager.setPackages([
+				"npm:user-old",
+				"npm:user-current",
+				"npm:user-unknown",
+				"npm:user-pinned@1.0.0",
+				"git:github.com/example/user-repo-a",
+				"git:github.com/example/user-repo-b",
+				"git:github.com/example/user-repo-pinned@v1",
+			]);
+			settingsManager.setProjectPackages([
+				"npm:project-old",
+				"npm:project-current",
+				"npm:project-missing",
+				"git:github.com/example/project-repo-a",
+			]);
+
+			const runCommandCaptureSpy = vi
+				.spyOn(packageManager as any, "runCommandCapture")
+				.mockImplementation(async (...callArgs: unknown[]) => {
+					const [_command, args] = callArgs as [string, string[]];
+					if (args[0] !== "view") {
+						throw new Error(`Unexpected runCommandCapture args: ${args.join(" ")}`);
+					}
+					switch (args[1]) {
+						case "user-old":
+						case "project-old":
+							return '"2.0.0"';
+						case "user-current":
+						case "project-current":
+							return '"1.0.0"';
+						case "user-unknown":
+							throw new Error("registry unavailable");
+						default:
+							throw new Error(`Unexpected package lookup: ${args[1]}`);
+					}
+				});
+
+			let activeNpmUpdates = 0;
+			let maxConcurrentNpmUpdates = 0;
+			const runCommandSpy = vi
+				.spyOn(packageManager as any, "runCommand")
+				.mockImplementation(async (...callArgs: unknown[]) => {
+					const [command, args] = callArgs as [string, string[]];
+					if (command !== "npm") {
+						throw new Error(`Unexpected runCommand call: ${command} ${args.join(" ")}`);
+					}
+					activeNpmUpdates += 1;
+					maxConcurrentNpmUpdates = Math.max(maxConcurrentNpmUpdates, activeNpmUpdates);
+					await new Promise((resolve) => setTimeout(resolve, 20));
+					activeNpmUpdates -= 1;
+				});
+
+			let activeGitUpdates = 0;
+			let maxConcurrentGitUpdates = 0;
+			const updateGitSpy = vi.spyOn(packageManager as any, "updateGit").mockImplementation(async () => {
+				activeGitUpdates += 1;
+				maxConcurrentGitUpdates = Math.max(maxConcurrentGitUpdates, activeGitUpdates);
+				await new Promise((resolve) => setTimeout(resolve, 20));
+				activeGitUpdates -= 1;
+			});
+
+			await packageManager.update();
+
+			expect(runCommandCaptureSpy).toHaveBeenCalledTimes(5);
+			expect(runCommandSpy).toHaveBeenCalledTimes(2);
+			expect(runCommandSpy).toHaveBeenNthCalledWith(
+				1,
+				"npm",
+				["install", "-g", "user-old@latest", "user-unknown@latest"],
+				undefined,
+			);
+			expect(runCommandSpy).toHaveBeenNthCalledWith(
+				2,
+				"npm",
+				["install", "project-old@latest", "project-missing@latest", "--prefix", join(tempDir, ".pinf", "npm")],
+				undefined,
+			);
+			expect(updateGitSpy).toHaveBeenCalledTimes(3);
+			expect(maxConcurrentNpmUpdates).toBeGreaterThan(1);
+			expect(maxConcurrentGitUpdates).toBeGreaterThan(1);
 		});
 
 		it("should suggest npm source prefixes for update lookups", async () => {

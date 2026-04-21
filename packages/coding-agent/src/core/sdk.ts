@@ -16,9 +16,6 @@ import { SettingsManager } from "./settings-manager.js";
 import { isInstallTelemetryEnabled } from "./telemetry.js";
 import { time } from "./timings.js";
 import {
-	allTools,
-	bashTool,
-	codingTools,
 	createBashTool,
 	createCodingTools,
 	createEditTool,
@@ -28,16 +25,8 @@ import {
 	createReadOnlyTools,
 	createReadTool,
 	createWriteTool,
-	editTool,
-	findTool,
-	grepTool,
-	lsTool,
-	readOnlyTools,
-	readTool,
-	type Tool,
 	type ToolName,
 	withFileMutationQueue,
-	writeTool,
 } from "./tools/index.js";
 
 export interface CreateAgentSessionOptions {
@@ -58,8 +47,14 @@ export interface CreateAgentSessionOptions {
 	/** Models available for cycling (Ctrl+P in interactive mode) */
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 
-	/** Built-in tools to use. Default: codingTools [read, bash, edit, write] */
-	tools?: Tool[];
+	/**
+	 * Optional allowlist of tool names.
+	 *
+	 * When omitted, pi enables the default built-in tools (read, bash, edit, write)
+	 * and leaves extension/custom tools enabled.
+	 * When provided, only the listed tool names are enabled.
+	 */
+	tools?: string[];
 	/** Custom tools to register (in addition to built-in tools). */
 	customTools?: ToolDefinition[];
 
@@ -107,17 +102,6 @@ export type { Skill } from "./skills.js";
 export type { Tool } from "./tools/index.js";
 
 export {
-	// Pre-built tools (use process.cwd())
-	readTool,
-	bashTool,
-	editTool,
-	writeTool,
-	grepTool,
-	findTool,
-	lsTool,
-	codingTools,
-	readOnlyTools,
-	allTools as allBuiltInTools,
 	withFileMutationQueue,
 	// Tool factories (for custom cwd)
 	createCodingTools,
@@ -190,7 +174,7 @@ function getOpenRouterAttributionHeaders(
  * ```
  */
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
-	const cwd = options.cwd ?? process.cwd();
+	const cwd = options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd();
 	const agentDir = options.agentDir ?? getDefaultAgentDir();
 	let resourceLoader = options.resourceLoader;
 
@@ -266,9 +250,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	}
 
 	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write"];
-	const initialActiveToolNames: ToolName[] = options.tools
-		? options.tools.map((t) => t.name).filter((n): n is ToolName => n in allTools)
-		: defaultActiveToolNames;
+	const initialActiveToolNames: string[] = options.tools ? [...options.tools] : defaultActiveToolNames;
 
 	let agent: Agent;
 
@@ -389,6 +371,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		customTools: options.customTools,
 		modelRegistry,
 		initialActiveToolNames,
+		allowedToolNames: options.tools,
 		extensionRunnerRef,
 		autoNextSteps: options.autoNextSteps,
 		autoNextIdea: options.autoNextIdea,
