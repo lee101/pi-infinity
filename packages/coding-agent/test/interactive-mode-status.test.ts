@@ -1,7 +1,8 @@
 import { homedir } from "node:os";
 import * as path from "node:path";
-import { Container } from "@mariozechner/pi-tui";
+import { type AutocompleteProvider, CombinedAutocompleteProvider, Container } from "@mariozechner/pi-tui";
 import { beforeAll, describe, expect, test, vi } from "vitest";
+import type { AutocompleteProviderFactory } from "../src/core/extensions/types.js";
 import type { SourceInfo } from "../src/core/source-info.js";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
@@ -147,6 +148,75 @@ describe("InteractiveMode.createExtensionUIContext setTheme", () => {
 	});
 });
 
+describe("InteractiveMode.createExtensionUIContext addAutocompleteProvider", () => {
+	test("stores wrapper factories and rebuilds autocomplete immediately", () => {
+		const wrapper: AutocompleteProviderFactory = (current) => current;
+		const fakeThis = {
+			autocompleteProviderWrappers: [] as AutocompleteProviderFactory[],
+			setupAutocompleteProvider: vi.fn(),
+		};
+
+		const uiContext = (InteractiveMode as any).prototype.createExtensionUIContext.call(fakeThis);
+		uiContext.addAutocompleteProvider(wrapper);
+
+		expect(fakeThis.autocompleteProviderWrappers).toEqual([wrapper]);
+		expect(fakeThis.setupAutocompleteProvider).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("InteractiveMode.setupAutocompleteProvider", () => {
+	test("stacks wrapper factories over a fresh base provider", () => {
+		const defaultEditor = { setAutocompleteProvider: vi.fn() };
+		const customEditor = { setAutocompleteProvider: vi.fn() };
+		const calls: string[] = [];
+
+		const wrap1: AutocompleteProviderFactory = (current): AutocompleteProvider => ({
+			async getSuggestions(lines, cursorLine, cursorCol, options) {
+				calls.push("getSuggestions:wrap1");
+				return current.getSuggestions(lines, cursorLine, cursorCol, options);
+			},
+			applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
+				calls.push("applyCompletion:wrap1");
+				return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
+			},
+			shouldTriggerFileCompletion(lines, cursorLine, cursorCol) {
+				calls.push("shouldTrigger:wrap1");
+				return current.shouldTriggerFileCompletion?.(lines, cursorLine, cursorCol) ?? true;
+			},
+		});
+		const wrap2: AutocompleteProviderFactory = (current): AutocompleteProvider => ({
+			async getSuggestions(lines, cursorLine, cursorCol, options) {
+				calls.push("getSuggestions:wrap2");
+				return current.getSuggestions(lines, cursorLine, cursorCol, options);
+			},
+			applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
+				calls.push("applyCompletion:wrap2");
+				return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
+			},
+			shouldTriggerFileCompletion(lines, cursorLine, cursorCol) {
+				calls.push("shouldTrigger:wrap2");
+				return current.shouldTriggerFileCompletion?.(lines, cursorLine, cursorCol) ?? true;
+			},
+		});
+
+		const fakeThis = {
+			createBaseAutocompleteProvider: () => new CombinedAutocompleteProvider([], "/tmp/project", undefined),
+			defaultEditor,
+			editor: customEditor,
+			autocompleteProviderWrappers: [wrap1, wrap2],
+		};
+
+		(InteractiveMode as any).prototype.setupAutocompleteProvider.call(fakeThis);
+
+		expect(defaultEditor.setAutocompleteProvider).toHaveBeenCalledTimes(1);
+		expect(customEditor.setAutocompleteProvider).toHaveBeenCalledTimes(1);
+		const provider = defaultEditor.setAutocompleteProvider.mock.calls[0]?.[0] as AutocompleteProvider;
+		expect(provider).toBe(customEditor.setAutocompleteProvider.mock.calls[0]?.[0]);
+		expect(provider.shouldTriggerFileCompletion?.(["foo"], 0, 3)).toBe(true);
+		expect(calls).toEqual(["shouldTrigger:wrap2", "shouldTrigger:wrap1"]);
+	});
+});
+
 describe("InteractiveMode.showLoadedResources", () => {
 	beforeAll(() => {
 		initTheme("dark");
@@ -175,7 +245,10 @@ describe("InteractiveMode.showLoadedResources", () => {
 			},
 			session: {
 				promptTemplates: [],
-				extensionRunner: undefined,
+				extensionRunner: {
+					getCommandDiagnostics: () => [],
+					getShortcutDiagnostics: () => [],
+				},
 				resourceLoader: {
 					getPathMetadata: () => new Map(),
 					getAgentsFiles: () => ({ agentsFiles: options.contextFiles ?? [] }),

@@ -1,6 +1,6 @@
 <p align="center">
-  <a href="https://shittycodingagent.ai">
-    <img src="https://shittycodingagent.ai/logo.svg" alt="pi logo" width="128">
+  <a href="https://pi.dev">
+    <img src="https://pi.dev/logo.svg" alt="pi logo" width="128">
   </a>
 </p>
 <p align="center">
@@ -120,6 +120,7 @@ For each built-in provider, pi maintains a list of tool-capable models, updated 
 - OpenCode Zen
 - OpenCode Go
 - Hugging Face
+- Fireworks
 - Kimi For Coding
 - MiniMax
 

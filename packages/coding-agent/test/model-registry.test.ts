@@ -135,6 +135,28 @@ describe("ModelRegistry", () => {
 			}
 		});
 
+		test("headers-only override resolves at request time", async () => {
+			writeRawModelsJson({
+				anthropic: {
+					headers: {
+						"X-Custom-Header": "custom-value",
+					},
+				},
+			});
+
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			expect(registry.getError()).toBeUndefined();
+			const anthropicModels = getModelsForProvider(registry, "anthropic");
+
+			for (const model of anthropicModels) {
+				const auth = await registry.getApiKeyAndHeaders(model);
+				expect(auth.ok).toBe(true);
+				if (auth.ok) {
+					expect(auth.headers?.["X-Custom-Header"]).toBe("custom-value");
+				}
+			}
+		});
+
 		test("baseUrl-only override does not affect other providers", () => {
 			writeRawModelsJson({
 				anthropic: overrideConfig("https://my-proxy.example.com/v1"),

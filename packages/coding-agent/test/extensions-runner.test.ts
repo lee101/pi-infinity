@@ -562,6 +562,50 @@ describe("ExtensionRunner", () => {
 		});
 	});
 
+	describe("before_agent_start", () => {
+		it("keeps ctx.getSystemPrompt() in sync with chained system prompt updates", async () => {
+			const extCode1 = `
+				export default function(pi) {
+					pi.on("before_agent_start", async (_event, ctx) => {
+						return {
+							systemPrompt: ctx.getSystemPrompt() + "\\nfirst",
+						};
+					});
+				}
+			`;
+			const extCode2 = `
+				export default function(pi) {
+					pi.on("before_agent_start", async (_event, ctx) => {
+						return {
+							systemPrompt: ctx.getSystemPrompt() + "\\nsecond",
+						};
+					});
+				}
+			`;
+			fs.writeFileSync(path.join(extensionsDir, "before-agent-start-1.ts"), extCode1);
+			fs.writeFileSync(path.join(extensionsDir, "before-agent-start-2.ts"), extCode2);
+
+			const result = await discoverAndLoadExtensions([], tempDir, tempDir);
+			expect(result.errors).toEqual([]);
+			expect(result.extensions).toHaveLength(2);
+			const runner = new ExtensionRunner(result.extensions, result.runtime, tempDir, sessionManager, modelRegistry);
+			const errors: string[] = [];
+			runner.onError((error) => errors.push(error.error));
+			runner.bindCore(extensionActions, extensionContextActions);
+
+			const chained = await runner.emitBeforeAgentStart("hello", undefined, "base", {
+				cwd: tempDir,
+			});
+
+			expect(errors).toEqual([]);
+
+			expect(chained).toEqual({
+				messages: undefined,
+				systemPrompt: "base\nfirst\nsecond",
+			});
+		});
+	});
+
 	describe("tool_result chaining", () => {
 		it("chains content modifications across handlers", async () => {
 			const extCode1 = `

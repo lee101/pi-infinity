@@ -32,6 +32,7 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	minimax: "MiniMax-M2.7",
 	"minimax-cn": "MiniMax-M2.7",
 	huggingface: "moonshotai/Kimi-K2.5",
+	fireworks: "accounts/fireworks/models/kimi-k2p6",
 	opencode: "claude-opus-4-6",
 	"opencode-go": "kimi-k2.5",
 	"kimi-coding": "kimi-for-coding",

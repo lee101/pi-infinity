@@ -881,7 +881,7 @@
           const images = getResultImages();
           if (images.length === 0) return '';
           return '<div class="tool-images">' +
-            images.map(img => `<img src="data:${img.mimeType};base64,${img.data}" class="tool-image" />`).join('') +
+            images.map(img => `<img src="data:${escapeHtml(img.mimeType || 'image/png')};base64,${img.data}" class="tool-image" />`).join('') +
             '</div>';
         };
 
@@ -1148,7 +1148,7 @@
               if (images.length > 0) {
                 html += '<div class="message-images">';
                 for (const img of images) {
-                  html += `<img src="data:${img.mimeType};base64,${img.data}" class="message-image" />`;
+                  html += `<img src="data:${escapeHtml(img.mimeType || 'image/png')};base64,${img.data}" class="message-image" />`;
                 }
                 html += '</div>';
               }
@@ -1491,6 +1491,32 @@
           }
         },
         renderer: {
+          // Sanitize link URLs to prevent javascript:/vbscript:/data: XSS
+          link(token) {
+            const href = (token.href || '').trim();
+            if (/^\s*(javascript|vbscript|data):/i.test(href)) {
+              return this.parser.parseInline(token.tokens);
+            }
+            let out = '<a href="' + escapeHtml(href) + '"';
+            if (token.title) {
+              out += ' title="' + escapeHtml(token.title) + '"';
+            }
+            out += '>' + this.parser.parseInline(token.tokens) + '</a>';
+            return out;
+          },
+          // Sanitize image src URLs
+          image(token) {
+            const href = (token.href || '').trim();
+            if (/^\s*(javascript|vbscript|data):/i.test(href)) {
+              return escapeHtml(token.text || '');
+            }
+            let out = '<img src="' + escapeHtml(href) + '" alt="' + escapeHtml(token.text || '') + '"';
+            if (token.title) {
+              out += ' title="' + escapeHtml(token.title) + '"';
+            }
+            out += '>';
+            return out;
+          },
           // Code blocks: syntax highlight, no HTML escaping
           code(token) {
             const code = token.text;

@@ -48,6 +48,9 @@ export interface Terminal {
 
 	// Title operations
 	setTitle(title: string): void; // Set terminal window title
+
+	// Progress indicator (OSC 9;4)
+	setProgress(active: boolean): void;
 }
 
 /**
@@ -356,5 +359,15 @@ export class ProcessTerminal implements Terminal {
 	setTitle(title: string): void {
 		// OSC 0;title BEL - set terminal window title
 		process.stdout.write(`\x1b]0;${title}\x07`);
+	}
+
+	setProgress(active: boolean): void {
+		if (active) {
+			// OSC 9;4;1;0 - indeterminate progress
+			process.stdout.write("\x1b]9;4;1;0\x07");
+		} else {
+			// OSC 9;4;0 - clear progress
+			process.stdout.write("\x1b]9;4;0;\x07");
+		}
 	}
 }

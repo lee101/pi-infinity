@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it, test } from "node:test";
@@ -298,6 +298,61 @@ describe("CombinedAutocompleteProvider", () => {
 			assert.ok(values.includes("@.pi/"));
 			assert.ok(values.includes("@.github/"));
 			assert.ok(!values.some((value) => value === "@.git" || value.startsWith("@.git/")));
+		});
+
+		test("follows symlinked directories for fuzzy @ search", async () => {
+			setupFolder(baseDir, {
+				files: {
+					"dir/some_file.txt": "real",
+				},
+			});
+			setupFolder(outsideDir, {
+				files: {
+					"some_file.txt": "symlinked",
+				},
+			});
+			symlinkSync("../outside", join(baseDir, "symlinked_dir"));
+
+			const provider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
+			const line = "@some";
+			const result = await getSuggestions(provider, [line], 0, line.length);
+
+			const values = result?.items.map((item) => item.value) ?? [];
+			assert.ok(values.includes("@dir/some_file.txt"));
+			assert.ok(values.includes("@symlinked_dir/some_file.txt"));
+		});
+
+		test("returns symlinked directories when matching their name", async () => {
+			setupFolder(outsideDir, {
+				files: {
+					"nested/file.txt": "symlinked",
+				},
+			});
+			symlinkSync("../outside", join(baseDir, "symlinked_dir"));
+
+			const provider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
+			const line = "@symlinked";
+			const result = await getSuggestions(provider, [line], 0, line.length);
+
+			const values = result?.items.map((item) => item.value) ?? [];
+			assert.ok(values.includes("@symlinked_dir/"));
+		});
+
+		test("returns symlinked files without requiring type l", async () => {
+			setupFolder(baseDir, {
+				files: {
+					"original.txt": "content",
+				},
+			});
+			const linkPath = join(baseDir, "link.txt");
+			symlinkSync("original.txt", linkPath);
+
+			const provider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
+			const line = "@link";
+			const result = await getSuggestions(provider, [line], 0, line.length);
+
+			const values = result?.items.map((item) => item.value) ?? [];
+			assert.ok(values.includes("@link.txt"));
 		});
 
 		test("returns the same @ suggestions when the cwd path contains the query", async () => {
