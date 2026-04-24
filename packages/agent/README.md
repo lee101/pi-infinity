@@ -367,7 +367,7 @@ const agent = new Agent({
 Define tools using `AgentTool`:
 
 ```typescript
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 const readFileTool: AgentTool = {
   name: "read_file",

@@ -140,7 +140,7 @@ See [docs/extensions.md](../../docs/extensions.md) for full documentation.
 
 ```typescript
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 export default function (pi: ExtensionAPI) {
   // Subscribe to lifecycle events

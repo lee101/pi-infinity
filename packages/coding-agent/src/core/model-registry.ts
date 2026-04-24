@@ -3,6 +3,7 @@
  */
 
 import {
+	type AnthropicMessagesCompat,
 	type Api,
 	type AssistantMessageEventStream,
 	type Context,
@@ -18,21 +19,19 @@ import {
 	type SimpleStreamOptions,
 } from "@mariozechner/pi-ai";
 import { registerOAuthProvider, resetOAuthProviders } from "@mariozechner/pi-ai/oauth";
-import { type Static, Type } from "@sinclair/typebox";
-import AjvModule from "ajv";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import { type Static, Type } from "typebox";
+import { Compile } from "typebox/compile";
+import type { TLocalizedValidationError } from "typebox/error";
 import { getAgentDir } from "../config.js";
-import type { AuthStorage } from "./auth-storage.js";
+import type { AuthStatus, AuthStorage } from "./auth-storage.js";
 import {
 	clearConfigValueCache,
 	resolveConfigValueOrThrow,
 	resolveConfigValueUncached,
 	resolveHeadersOrThrow,
 } from "./resolve-config-value.js";
-
-const Ajv = (AjvModule as any).default || AjvModule;
-const ajv = new Ajv();
 
 // Schema for OpenRouter routing preferences
 const PercentileCutoffsSchema = Type.Object({
@@ -99,10 +98,12 @@ const OpenAICompletionsCompatSchema = Type.Object({
 	requiresToolResultName: Type.Optional(Type.Boolean()),
 	requiresAssistantAfterToolResult: Type.Optional(Type.Boolean()),
 	requiresThinkingAsText: Type.Optional(Type.Boolean()),
+	requiresReasoningContentOnAssistantMessages: Type.Optional(Type.Boolean()),
 	thinkingFormat: Type.Optional(
 		Type.Union([
 			Type.Literal("openai"),
 			Type.Literal("openrouter"),
+			Type.Literal("deepseek"),
 			Type.Literal("zai"),
 			Type.Literal("qwen"),
 			Type.Literal("qwen-chat-template"),
@@ -112,13 +113,24 @@ const OpenAICompletionsCompatSchema = Type.Object({
 	openRouterRouting: Type.Optional(OpenRouterRoutingSchema),
 	vercelGatewayRouting: Type.Optional(VercelGatewayRoutingSchema),
 	supportsStrictMode: Type.Optional(Type.Boolean()),
+	supportsLongCacheRetention: Type.Optional(Type.Boolean()),
 });
 
 const OpenAIResponsesCompatSchema = Type.Object({
-	// Reserved for future use
+	sendSessionIdHeader: Type.Optional(Type.Boolean()),
+	supportsLongCacheRetention: Type.Optional(Type.Boolean()),
 });
 
-const OpenAICompatSchema = Type.Union([OpenAICompletionsCompatSchema, OpenAIResponsesCompatSchema]);
+const AnthropicMessagesCompatSchema = Type.Object({
+	supportsEagerToolInputStreaming: Type.Optional(Type.Boolean()),
+	supportsLongCacheRetention: Type.Optional(Type.Boolean()),
+});
+
+const ProviderCompatSchema = Type.Union([
+	OpenAICompletionsCompatSchema,
+	OpenAIResponsesCompatSchema,
+	AnthropicMessagesCompatSchema,
+]);
 
 // Schema for custom model definition
 // Most fields are optional with sensible defaults for local models (Ollama, LM Studio, etc.)
@@ -140,7 +152,7 @@ const ModelDefinitionSchema = Type.Object({
 	contextWindow: Type.Optional(Type.Number()),
 	maxTokens: Type.Optional(Type.Number()),
 	headers: Type.Optional(Type.Record(Type.String(), Type.String())),
-	compat: Type.Optional(OpenAICompatSchema),
+	compat: Type.Optional(ProviderCompatSchema),
 });
 
 // Schema for per-model overrides (all fields optional, merged with built-in model)
@@ -159,7 +171,7 @@ const ModelOverrideSchema = Type.Object({
 	contextWindow: Type.Optional(Type.Number()),
 	maxTokens: Type.Optional(Type.Number()),
 	headers: Type.Optional(Type.Record(Type.String(), Type.String())),
-	compat: Type.Optional(OpenAICompatSchema),
+	compat: Type.Optional(ProviderCompatSchema),
 });
 
 type ModelOverride = Static<typeof ModelOverrideSchema>;
@@ -169,7 +181,7 @@ const ProviderConfigSchema = Type.Object({
 	apiKey: Type.Optional(Type.String({ minLength: 1 })),
 	api: Type.Optional(Type.String({ minLength: 1 })),
 	headers: Type.Optional(Type.Record(Type.String(), Type.String())),
-	compat: Type.Optional(OpenAICompatSchema),
+	compat: Type.Optional(ProviderCompatSchema),
 	authHeader: Type.Optional(Type.Boolean()),
 	models: Type.Optional(Type.Array(ModelDefinitionSchema)),
 	modelOverrides: Type.Optional(Type.Record(Type.String(), ModelOverrideSchema)),
@@ -179,9 +191,22 @@ const ModelsConfigSchema = Type.Object({
 	providers: Type.Record(Type.String(), ProviderConfigSchema),
 });
 
-ajv.addSchema(ModelsConfigSchema, "ModelsConfig");
+const validateModelsConfig = Compile(ModelsConfigSchema);
 
 type ModelsConfig = Static<typeof ModelsConfigSchema>;
+
+function formatValidationPath(error: TLocalizedValidationError): string {
+	if (error.keyword === "required") {
+		const requiredProperties = (error.params as { requiredProperties?: string[] }).requiredProperties;
+		const requiredProperty = requiredProperties?.[0];
+		if (requiredProperty) {
+			const basePath = error.instancePath.replace(/^\//, "").replace(/\//g, ".");
+			return basePath ? `${basePath}.${requiredProperty}` : requiredProperty;
+		}
+	}
+	const path = error.instancePath.replace(/^\//, "").replace(/\//g, ".");
+	return path || "root";
+}
 
 /** Provider override config (baseUrl, compat) without request auth/headers */
 interface ProviderOverride {
@@ -226,9 +251,9 @@ function mergeCompat(
 ): Model<Api>["compat"] | undefined {
 	if (!overrideCompat) return baseCompat;
 
-	const base = baseCompat as OpenAICompletionsCompat | OpenAIResponsesCompat | undefined;
-	const override = overrideCompat as OpenAICompletionsCompat | OpenAIResponsesCompat;
-	const merged = { ...base, ...override } as OpenAICompletionsCompat | OpenAIResponsesCompat;
+	const base = baseCompat as OpenAICompletionsCompat | OpenAIResponsesCompat | AnthropicMessagesCompat | undefined;
+	const override = overrideCompat as OpenAICompletionsCompat | OpenAIResponsesCompat | AnthropicMessagesCompat;
+	const merged = { ...base, ...override } as OpenAICompletionsCompat | OpenAIResponsesCompat | AnthropicMessagesCompat;
 
 	const baseCompletions = base as OpenAICompletionsCompat | undefined;
 	const overrideCompletions = override as OpenAICompletionsCompat;
@@ -417,16 +442,18 @@ export class ModelRegistry {
 
 		try {
 			const content = readFileSync(modelsJsonPath, "utf-8");
-			const config: ModelsConfig = JSON.parse(content);
+			const parsed = JSON.parse(content) as unknown;
 
-			// Validate schema
-			const validate = ajv.getSchema("ModelsConfig")!;
-			if (!validate(config)) {
+			if (!validateModelsConfig.Check(parsed)) {
 				const errors =
-					validate.errors?.map((e: any) => `  - ${e.instancePath || "root"}: ${e.message}`).join("\n") ||
-					"Unknown schema error";
+					validateModelsConfig
+						.Errors(parsed)
+						.map((error) => `  - ${formatValidationPath(error)}: ${error.message}`)
+						.join("\n") || "Unknown schema error";
 				return emptyCustomModelsResult(`Invalid models.json schema:\n${errors}\n\nFile: ${modelsJsonPath}`);
 			}
+
+			const config = parsed as ModelsConfig;
 
 			// Additional validation
 			this.validateConfig(config);
@@ -672,6 +699,32 @@ export class ModelRegistry {
 				error: error instanceof Error ? error.message : String(error),
 			};
 		}
+	}
+
+	/**
+	 * Return auth status for a provider, including request auth configured in models.json.
+	 * This intentionally does not execute command-backed config values.
+	 */
+	getProviderAuthStatus(provider: string): AuthStatus {
+		const authStatus = this.authStorage.getAuthStatus(provider);
+		if (authStatus.source) {
+			return authStatus;
+		}
+
+		const providerApiKey = this.providerRequestConfigs.get(provider)?.apiKey;
+		if (!providerApiKey) {
+			return authStatus;
+		}
+
+		if (providerApiKey.startsWith("!")) {
+			return { configured: true, source: "models_json_command" };
+		}
+
+		if (process.env[providerApiKey]) {
+			return { configured: true, source: "environment", label: providerApiKey };
+		}
+
+		return { configured: true, source: "models_json_key" };
 	}
 
 	/**

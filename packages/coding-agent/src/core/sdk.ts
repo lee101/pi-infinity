@@ -1,8 +1,9 @@
 import { join } from "node:path";
 import { Agent, type AgentMessage, type ThinkingLevel } from "@mariozechner/pi-agent-core";
 import { type Message, type Model, streamSimple } from "@mariozechner/pi-ai";
-import { getAgentDir, getDocsPath } from "../config.js";
+import { getAgentDir } from "../config.js";
 import { AgentSession } from "./agent-session.js";
+import { formatNoModelsAvailableMessage } from "./auth-guidance.js";
 import { AuthStorage } from "./auth-storage.js";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.js";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.js";
@@ -48,10 +49,18 @@ export interface CreateAgentSessionOptions {
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 
 	/**
+	 * Optional default tool suppression mode when no explicit allowlist is provided.
+	 *
+	 * - "all": start with no tools enabled
+	 * - "builtin": disable the default built-in tools (read, bash, edit, write)
+	 *   but keep extension/custom tools enabled
+	 */
+	noTools?: "all" | "builtin";
+	/**
 	 * Optional allowlist of tool names.
 	 *
 	 * When omitted, pi enables the default built-in tools (read, bash, edit, write)
-	 * and leaves extension/custom tools enabled.
+	 * and leaves extension/custom tools enabled unless `noTools` changes that default.
 	 * When provided, only the listed tool names are enabled.
 	 */
 	tools?: string[];
@@ -224,7 +233,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		});
 		model = result.model;
 		if (!model) {
-			modelFallbackMessage = `No models available. Use /login or set an API key environment variable. See ${join(getDocsPath(), "providers.md")}. Then use /model to select a model.`;
+			modelFallbackMessage = formatNoModelsAvailableMessage();
 		} else if (modelFallbackMessage) {
 			modelFallbackMessage += `. Using ${model.provider}/${model.id}`;
 		}
@@ -250,7 +259,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	}
 
 	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write"];
-	const initialActiveToolNames: string[] = options.tools ? [...options.tools] : defaultActiveToolNames;
+	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
+	const initialActiveToolNames: string[] = options.tools
+		? [...options.tools]
+		: options.noTools
+			? []
+			: defaultActiveToolNames;
 
 	let agent: Agent;
 
@@ -306,10 +320,14 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			if (!auth.ok) {
 				throw new Error(auth.error);
 			}
+			const providerRetrySettings = settingsManager.getProviderRetrySettings();
 			const openRouterAttributionHeaders = getOpenRouterAttributionHeaders(model, settingsManager);
 			return streamSimple(model, context, {
 				...options,
 				apiKey: auth.apiKey,
+				timeoutMs: options?.timeoutMs ?? providerRetrySettings.timeoutMs,
+				maxRetries: options?.maxRetries ?? providerRetrySettings.maxRetries,
+				maxRetryDelayMs: options?.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
 				headers:
 					openRouterAttributionHeaders || auth.headers || options?.headers
 						? { ...openRouterAttributionHeaders, ...auth.headers, ...options?.headers }
@@ -344,7 +362,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		followUpMode: settingsManager.getFollowUpMode(),
 		transport: settingsManager.getTransport(),
 		thinkingBudgets: settingsManager.getThinkingBudgets(),
-		maxRetryDelayMs: settingsManager.getRetrySettings().maxDelayMs,
+		maxRetryDelayMs: settingsManager.getProviderRetrySettings().maxRetryDelayMs,
 	});
 
 	// Restore messages if session has existing data
@@ -371,7 +389,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		customTools: options.customTools,
 		modelRegistry,
 		initialActiveToolNames,
-		allowedToolNames: options.tools,
+		allowedToolNames,
 		extensionRunnerRef,
 		autoNextSteps: options.autoNextSteps,
 		autoNextIdea: options.autoNextIdea,

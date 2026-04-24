@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Api, Context, Model, OpenAICompletionsCompat } from "@mariozechner/pi-ai";
+import type { AnthropicMessagesCompat, Api, Context, Model, OpenAICompletionsCompat } from "@mariozechner/pi-ai";
 import { getApiProvider } from "@mariozechner/pi-ai";
 import { getOAuthProvider } from "@mariozechner/pi-ai/oauth";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -430,6 +430,64 @@ describe("ModelRegistry", () => {
 			expect(compat?.reasoningEffortMap).toEqual({ minimal: "default", high: "max" });
 			expect(compat?.supportsStrictMode).toBe(false);
 			expect(compat?.cacheControlFormat).toBe("anthropic");
+		});
+
+		test("compat schema accepts Anthropic eager tool input streaming flag", () => {
+			writeRawModelsJson({
+				demo: {
+					baseUrl: "https://example.com",
+					apiKey: "DEMO_KEY",
+					api: "anthropic-messages",
+					compat: {
+						supportsEagerToolInputStreaming: false,
+					},
+					models: [
+						{
+							id: "demo-model",
+							reasoning: true,
+							input: ["text"],
+							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+							contextWindow: 1000,
+							maxTokens: 100,
+						},
+					],
+				},
+			});
+
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			const compat = registry.find("demo", "demo-model")?.compat as AnthropicMessagesCompat | undefined;
+
+			expect(registry.getError()).toBeUndefined();
+			expect(compat?.supportsEagerToolInputStreaming).toBe(false);
+		});
+
+		test("compat schema accepts long cache retention flag", () => {
+			writeRawModelsJson({
+				demo: {
+					baseUrl: "https://example.com",
+					apiKey: "DEMO_KEY",
+					api: "anthropic-messages",
+					compat: {
+						supportsLongCacheRetention: false,
+					},
+					models: [
+						{
+							id: "demo-model",
+							reasoning: true,
+							input: ["text"],
+							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+							contextWindow: 1000,
+							maxTokens: 100,
+						},
+					],
+				},
+			});
+
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			const compat = registry.find("demo", "demo-model")?.compat as AnthropicMessagesCompat | undefined;
+
+			expect(registry.getError()).toBeUndefined();
+			expect(compat?.supportsLongCacheRetention).toBe(false);
 		});
 
 		test("model-level baseUrl overrides provider-level baseUrl for custom models", () => {
@@ -1104,6 +1162,64 @@ describe("ModelRegistry", () => {
 
 				const count = parseInt(readFileSync(counterFile, "utf-8").trim(), 10);
 				expect(count).toBe(2);
+			});
+
+			test("provider auth status reports apiKey environment variables from models.json", () => {
+				const envVarName = "TEST_API_KEY_STATUS_TEST_98765";
+				const originalEnv = process.env[envVarName];
+
+				try {
+					process.env[envVarName] = "status-test-key";
+
+					writeRawModelsJson({
+						"custom-provider": providerWithApiKey(envVarName),
+					});
+
+					const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+
+					expect(registry.getProviderAuthStatus("custom-provider")).toEqual({
+						configured: true,
+						source: "environment",
+						label: envVarName,
+					});
+				} finally {
+					if (originalEnv === undefined) {
+						delete process.env[envVarName];
+					} else {
+						process.env[envVarName] = originalEnv;
+					}
+				}
+			});
+
+			test("provider auth status reports non-env apiKey values from models.json as a config key", () => {
+				writeRawModelsJson({
+					"custom-provider": providerWithApiKey("literal_api_key_value"),
+				});
+
+				const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+
+				expect(registry.getProviderAuthStatus("custom-provider")).toEqual({
+					configured: true,
+					source: "models_json_key",
+				});
+			});
+
+			test("provider auth status reports command apiKey values from models.json without executing them", () => {
+				const counterFile = join(tempDir, "status-counter");
+				writeFileSync(counterFile, "0");
+				const counterPath = toShPath(counterFile);
+				const command = `!sh -c 'echo 1 > "${counterPath}"; echo key-value'`;
+				writeRawModelsJson({
+					"custom-provider": providerWithApiKey(command),
+				});
+
+				const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+
+				expect(registry.getProviderAuthStatus("custom-provider")).toEqual({
+					configured: true,
+					source: "models_json_command",
+				});
+				expect(readFileSync(counterFile, "utf-8")).toBe("0");
 			});
 
 			test("environment variables are not cached (changes are picked up)", async () => {

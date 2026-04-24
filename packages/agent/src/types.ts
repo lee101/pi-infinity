@@ -10,7 +10,7 @@ import type {
 	Tool,
 	ToolResultMessage,
 } from "@mariozechner/pi-ai";
-import type { Static, TSchema } from "@sinclair/typebox";
+import type { Static, TSchema } from "typebox";
 
 /**
  * Stream function used by the agent loop.
@@ -225,7 +225,8 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 
 /**
  * Thinking/reasoning level for models that support it.
- * Note: "xhigh" is only supported by OpenAI gpt-5.1-codex-max, gpt-5.2, gpt-5.2-codex, gpt-5.3, and gpt-5.3-codex models.
+ * Note: "xhigh" is only supported by selected model families. Use supportsXhigh() from @mariozechner/pi-ai
+ * to detect support for a concrete model.
  */
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
