@@ -13,9 +13,9 @@
  *   pi --extension examples/extensions/custom-compaction.ts
  */
 
-import { complete } from "@mariozechner/pi-ai";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { convertToLlm, serializeConversation } from "@mariozechner/pi-coding-agent";
+import { uuidv7 } from "@earendil-works/pi-ai";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
 
 export default function (pi: ExtensionAPI) {
 	pi.on("session_before_compact", async (event, ctx) => {
@@ -87,14 +87,17 @@ ${conversationText}
 
 		try {
 			// Pass signal to honor abort requests (e.g., user cancels compaction)
-			const response = await complete(
+			const response = await ctx.modelRegistry.complete(
 				model,
 				{ messages: summaryMessages },
 				{
 					apiKey: auth.apiKey,
 					headers: auth.headers,
+					env: auth.env,
 					maxTokens: 8192,
 					signal,
+					cacheRetention: "none",
+					sessionId: uuidv7(),
 				},
 			);
 
@@ -115,6 +118,7 @@ ${conversationText}
 					summary,
 					firstKeptEntryId,
 					tokensBefore,
+					usage: response.usage,
 				},
 			};
 		} catch (error) {

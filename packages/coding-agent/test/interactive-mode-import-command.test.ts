@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { SessionImportFileNotFoundError } from "../src/core/agent-session-runtime.js";
-import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
+import { SessionImportFileNotFoundError } from "../src/core/agent-session-runtime.ts";
+import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
 type PathCommand = "/export" | "/import";
 
@@ -10,8 +10,7 @@ type InteractiveModePrototype = {
 };
 
 type ImportCommandContext = {
-	loadingAnimation?: { stop: () => void };
-	statusContainer: { clear: () => void };
+	clearStatusIndicator: () => void;
 	runtimeHost: { importFromJsonl: (inputPath: string, cwdOverride?: string) => Promise<{ cancelled: boolean }> };
 	showError: (message: string) => void;
 	showStatus: (message: string) => void;
@@ -58,7 +57,7 @@ describe("InteractiveMode /import parsing", () => {
 		const showError = vi.fn();
 
 		const context: ImportCommandContext = {
-			statusContainer: { clear: vi.fn() },
+			clearStatusIndicator: vi.fn(),
 			runtimeHost: { importFromJsonl },
 			showError,
 			showStatus,
@@ -90,7 +89,7 @@ describe("InteractiveMode /import parsing", () => {
 		const showError = vi.fn();
 
 		const context: ImportCommandContext = {
-			statusContainer: { clear: vi.fn() },
+			clearStatusIndicator: vi.fn(),
 			runtimeHost: { importFromJsonl },
 			showError,
 			showStatus,
@@ -123,7 +122,7 @@ describe("InteractiveMode /import parsing", () => {
 		});
 
 		const context: ImportCommandContext = {
-			statusContainer: { clear: vi.fn() },
+			clearStatusIndicator: vi.fn(),
 			runtimeHost: { importFromJsonl },
 			showError,
 			showStatus,

@@ -12,17 +12,23 @@
  */
 
 import * as crypto from "node:crypto";
-import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
+import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
 import type {
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
 	ExtensionWidgetOptions,
 	WorkingIndicatorOptions,
-} from "../../core/extensions/index.js";
-import { takeOverStdout, writeRawStdout } from "../../core/output-guard.js";
-import { killTrackedDetachedChildren } from "../../utils/shell.js";
-import { type Theme, theme } from "../interactive/theme/theme.js";
-import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
+} from "../../core/extensions/index.ts";
+import {
+	flushRawStdout,
+	takeOverStdout,
+	waitForRawStdoutBackpressure,
+	writeRawStdout,
+} from "../../core/output-guard.ts";
+import { killTrackedDetachedChildren } from "../../utils/shell.ts";
+import { type Theme, theme } from "../interactive/theme/theme.ts";
+import { toJsonEvent } from "../json-event.ts";
+import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.ts";
 import type {
 	RpcCommand,
 	RpcExtensionUIRequest,
@@ -30,7 +36,7 @@ import type {
 	RpcResponse,
 	RpcSessionState,
 	RpcSlashCommand,
-} from "./rpc-types.js";
+} from "./rpc-types.ts";
 
 // Re-export types for consumers
 export type {
@@ -39,7 +45,7 @@ export type {
 	RpcExtensionUIResponse,
 	RpcResponse,
 	RpcSessionState,
-} from "./rpc-types.js";
+} from "./rpc-types.ts";
 
 /**
  * Run in RPC mode.
@@ -49,6 +55,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	takeOverStdout();
 	let session = runtimeHost.session;
 	let unsubscribe: (() => void) | undefined;
+	let unsubscribeBackpressure: (() => void) | undefined;
 
 	const output = (obj: RpcResponse | RpcExtensionUIRequest | object) => {
 		writeRawStdout(serializeJsonLine(obj));
@@ -271,6 +278,11 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			// Custom editor components not supported in RPC mode
 		},
 
+		getEditorComponent() {
+			// Custom editor components not supported in RPC mode
+			return undefined;
+		},
+
 		get theme() {
 			return theme;
 		},
@@ -306,8 +318,9 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		session = runtimeHost.session;
 		await session.bindExtensions({
 			uiContext: createExtensionUIContext(),
+			mode: "rpc",
 			commandContextActions: {
-				waitForIdle: () => session.agent.waitForIdle(),
+				waitForIdle: () => session.waitForIdle(),
 				newSession: async (options) => runtimeHost.newSession(options),
 				fork: async (entryId, forkOptions) => {
 					const result = await runtimeHost.fork(entryId, forkOptions);
@@ -338,8 +351,15 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		});
 
 		unsubscribe?.();
+		unsubscribeBackpressure?.();
 		unsubscribe = session.subscribe((event) => {
-			output(event);
+			output(toJsonEvent(event));
+			if (event.type === "agent_settled") {
+				void checkShutdownRequested();
+			}
+		});
+		unsubscribeBackpressure = session.agent.subscribe(async () => {
+			await waitForRawStdoutBackpressure();
 		});
 	};
 
@@ -352,7 +372,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		for (const signal of signals) {
 			const handler = () => {
 				killTrackedDetachedChildren();
-				void shutdown(signal === "SIGHUP" ? 129 : 143);
+				void shutdown(signal === "SIGHUP" ? 129 : 143, signal);
 			};
 			process.on(signal, handler);
 			signalCleanupHandlers.push(() => process.off(signal, handler));
@@ -446,7 +466,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			// =================================================================
 
 			case "set_model": {
-				const models = await session.modelRegistry.getAvailable();
+				const models = session.modelRuntime.getAvailableSnapshot();
 				const model = models.find((m) => m.provider === command.provider && m.id === command.modelId);
 				if (!model) {
 					return error(id, "set_model", `Model not found: ${command.provider}/${command.modelId}`);
@@ -464,7 +484,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			}
 
 			case "get_available_models": {
-				const models = await session.modelRegistry.getAvailable();
+				const models = session.modelRuntime.getAvailableSnapshot();
 				return success(id, "get_available_models", { models });
 			}
 
@@ -483,6 +503,11 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					return success(id, "cycle_thinking_level", null);
 				}
 				return success(id, "cycle_thinking_level", { level });
+			}
+
+			case "get_available_thinking_levels": {
+				const levels = session.getAvailableThinkingLevels();
+				return success(id, "get_available_thinking_levels", { levels });
 			}
 
 			// =================================================================
@@ -532,7 +557,25 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			// =================================================================
 
 			case "bash": {
-				const result = await session.executeBash(command.command);
+				const eventResult = await session.extensionRunner.emitUserBash({
+					type: "user_bash",
+					command: command.command,
+					excludeFromContext: command.excludeFromContext ?? false,
+					cwd: session.sessionManager.getCwd(),
+				});
+
+				if (eventResult?.result) {
+					session.recordBashResult(command.command, eventResult.result, {
+						excludeFromContext: command.excludeFromContext,
+					});
+					return success(id, "bash", eventResult.result);
+				}
+
+				const result = await session.executeBash(command.command, undefined, {
+					excludeFromContext: command.excludeFromContext,
+					id,
+					operations: eventResult?.operations,
+				});
 				return success(id, "bash", result);
 			}
 
@@ -586,6 +629,24 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			case "get_fork_messages": {
 				const messages = session.getUserMessagesForForking();
 				return success(id, "get_fork_messages", { messages });
+			}
+
+			case "get_entries": {
+				const sessionManager = session.sessionManager;
+				let entries = sessionManager.getEntries();
+				if (command.since !== undefined) {
+					const sinceIndex = entries.findIndex((e) => e.id === command.since);
+					if (sinceIndex === -1) {
+						return error(id, "get_entries", `Entry not found: ${command.since}`);
+					}
+					entries = entries.slice(sinceIndex + 1);
+				}
+				return success(id, "get_entries", { entries, leafId: sessionManager.getLeafId() });
+			}
+
+			case "get_tree": {
+				const sessionManager = session.sessionManager;
+				return success(id, "get_tree", { tree: sessionManager.getTree(), leafId: sessionManager.getLeafId() });
 			}
 
 			case "get_last_assistant_text": {
@@ -649,7 +710,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 
 			default: {
 				const unknownCommand = command as { type: string };
-				return error(undefined, unknownCommand.type, `Unknown command: ${unknownCommand.type}`);
+				return error(id, unknownCommand.type, `Unknown command: ${unknownCommand.type}`);
 			}
 		}
 	};
@@ -660,7 +721,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	 */
 	let detachInput = () => {};
 
-	async function shutdown(exitCode = 0): Promise<never> {
+	async function shutdown(exitCode = 0, signal?: NodeJS.Signals): Promise<never> {
 		if (shuttingDown) {
 			process.exit(exitCode);
 		}
@@ -669,9 +730,13 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			cleanup();
 		}
 		unsubscribe?.();
+		unsubscribeBackpressure?.();
 		await runtimeHost.dispose();
 		detachInput();
 		process.stdin.pause();
+		if (signal !== "SIGTERM") {
+			await flushRawStdout();
+		}
 		process.exit(exitCode);
 	}
 
@@ -692,6 +757,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					`Failed to parse command: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
 				),
 			);
+			await waitForRawStdoutBackpressure();
 			return;
 		}
 
@@ -716,6 +782,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			const response = await handleCommand(command);
 			if (response) {
 				output(response);
+				await waitForRawStdoutBackpressure();
 			}
 			await checkShutdownRequested();
 		} catch (commandError: unknown) {
@@ -726,6 +793,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					commandError instanceof Error ? commandError.message : String(commandError),
 				),
 			);
+			await waitForRawStdoutBackpressure();
 		}
 	};
 

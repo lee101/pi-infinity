@@ -27,13 +27,13 @@
 		"includes": [
 			"packages/*/src/**/*.ts",
 			"packages/*/test/**/*.ts",
+			"packages/storage/*/src/**/*.ts",
+			"packages/storage/*/test/**/*.ts",
 			"packages/coding-agent/examples/**/*.ts",
-			"packages/web-ui/src/**/*.ts",
-			"packages/web-ui/example/**/*.ts",
 			"!**/node_modules/**/*",
 			"!**/test-sessions.ts",
 			"!**/models.generated.ts",
-			"!packages/web-ui/src/app.css",
+			"!**/*.models.ts",
 			"!packages/mom/data/**/*",
 			"!!**/node_modules"
 		]

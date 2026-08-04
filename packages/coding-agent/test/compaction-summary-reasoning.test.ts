@@ -1,21 +1,26 @@
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import type { AssistantMessage, Model } from "@mariozechner/pi-ai";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { generateSummary } from "../src/core/compaction/index.js";
+import {
+	type CompactionPreparation,
+	compact,
+	generateSummary,
+	generateSummaryWithUsage,
+} from "../src/core/compaction/index.ts";
 
 const { completeSimpleMock } = vi.hoisted(() => ({
 	completeSimpleMock: vi.fn(),
 }));
 
-vi.mock("@mariozechner/pi-ai", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@mariozechner/pi-ai")>();
+vi.mock("@earendil-works/pi-ai/compat", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@earendil-works/pi-ai/compat")>();
 	return {
 		...actual,
 		completeSimple: completeSimpleMock,
 	};
 });
 
-function createModel(reasoning: boolean): Model<"anthropic-messages"> {
+function createModel(reasoning: boolean, maxTokens = 8192): Model<"anthropic-messages"> {
 	return {
 		id: reasoning ? "reasoning-model" : "non-reasoning-model",
 		name: reasoning ? "Reasoning Model" : "Non-reasoning Model",
@@ -26,7 +31,7 @@ function createModel(reasoning: boolean): Model<"anthropic-messages"> {
 		input: ["text"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 200000,
-		maxTokens: 8192,
+		maxTokens,
 	};
 }
 
@@ -57,7 +62,7 @@ describe("generateSummary reasoning options", () => {
 	});
 
 	it("uses the provided thinking level for reasoning-capable models", async () => {
-		await generateSummary(
+		const result = await generateSummaryWithUsage(
 			messages,
 			createModel(true),
 			2000,
@@ -69,11 +74,32 @@ describe("generateSummary reasoning options", () => {
 			"medium",
 		);
 
+		expect(result.text).toBe("## Goal\nTest summary");
+		expect(result.usage).toEqual(mockSummaryResponse.usage);
+
 		expect(completeSimpleMock).toHaveBeenCalledTimes(1);
 		expect(completeSimpleMock.mock.calls[0][2]).toMatchObject({
 			reasoning: "medium",
 			apiKey: "test-key",
 		});
+	});
+
+	it("preserves the string result from generateSummary", async () => {
+		await expect(generateSummary(messages, createModel(false), 2000, "test-key")).resolves.toBe(
+			"## Goal\nTest summary",
+		);
+	});
+
+	it("uses fresh routing sessions without prompt caching", async () => {
+		await generateSummary(messages, createModel(false), 2000, "test-key");
+		await generateSummary(messages, createModel(false), 2000, "test-key");
+
+		const requestOptions = completeSimpleMock.mock.calls.map((call) => call[2]);
+		expect(requestOptions).toHaveLength(2);
+		expect(requestOptions.every((options) => options?.cacheRetention === "none")).toBe(true);
+
+		const sessionIds = requestOptions.map((options) => options?.sessionId);
+		expect(sessionIds[0]).not.toBe(sessionIds[1]);
 	});
 
 	it("does not set reasoning when thinking is off", async () => {
@@ -114,5 +140,28 @@ describe("generateSummary reasoning options", () => {
 			apiKey: "test-key",
 		});
 		expect(completeSimpleMock.mock.calls[0][2]).not.toHaveProperty("reasoning");
+	});
+
+	it("clamps compaction summary maxTokens to the model output cap", async () => {
+		const preparation: CompactionPreparation = {
+			firstKeptEntryId: "entry-keep",
+			messagesToSummarize: messages,
+			turnPrefixMessages: messages,
+			isSplitTurn: true,
+			tokensBefore: 600000,
+			fileOps: { read: new Set(), written: new Set(), edited: new Set() },
+			settings: { enabled: true, reserveTokens: 500000, keepRecentTokens: 20000 },
+		};
+
+		const result = await compact(preparation, createModel(false, 128000), "test-key");
+
+		expect(result.usage).toEqual({
+			...mockSummaryResponse.usage,
+			input: 20,
+			output: 20,
+			totalTokens: 40,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		});
+		expect(completeSimpleMock.mock.calls.map((call) => call[2]?.maxTokens)).toEqual([128000, 128000]);
 	});
 });

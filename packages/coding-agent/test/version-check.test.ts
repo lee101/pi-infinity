@@ -1,13 +1,18 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	checkForNewPiVersion,
 	comparePackageVersions,
+	getLatestPiRelease,
 	getLatestPiVersion,
 	isNewerPackageVersion,
-} from "../src/utils/version-check.js";
+} from "../src/utils/version-check.ts";
+import { allowNetwork } from "./test-network-env.ts";
 
 const originalSkipVersionCheck = process.env.PI_SKIP_VERSION_CHECK;
-const originalOffline = process.env.PI_OFFLINE;
+
+beforeEach(() => {
+	allowNetwork();
+});
 
 afterEach(() => {
 	vi.unstubAllGlobals();
@@ -16,11 +21,6 @@ afterEach(() => {
 	} else {
 		process.env.PI_SKIP_VERSION_CHECK = originalSkipVersionCheck;
 	}
-	if (originalOffline === undefined) {
-		delete process.env.PI_OFFLINE;
-	} else {
-		process.env.PI_OFFLINE = originalOffline;
-	}
 });
 
 describe("version checks", () => {
@@ -28,6 +28,7 @@ describe("version checks", () => {
 		expect(comparePackageVersions("0.70.6", "0.70.5")).toBeGreaterThan(0);
 		expect(comparePackageVersions("0.70.5", "0.70.5")).toBe(0);
 		expect(comparePackageVersions("0.70.4", "0.70.5")).toBeLessThan(0);
+		expect(comparePackageVersions("5.0.0-beta.20", "5.0.0-beta.9")).toBeGreaterThan(0);
 		expect(isNewerPackageVersion("0.70.5", "0.70.5")).toBe(false);
 		expect(isNewerPackageVersion("0.70.6", "0.70.5")).toBe(true);
 	});
@@ -37,16 +38,16 @@ describe("version checks", () => {
 		vi.stubGlobal("fetch", fetchMock);
 
 		await expect(checkForNewPiVersion("1.2.3")).resolves.toBeUndefined();
-		await expect(checkForNewPiVersion("1.2.2")).resolves.toBe("1.2.3");
+		await expect(checkForNewPiVersion("1.2.2")).resolves.toEqual({ version: "1.2.3" });
 	});
 
-	it("uses the pi.dev version check api with a pi user agent", async () => {
+	it("uses the active fork package registry with a pi user agent", async () => {
 		const fetchMock = vi.fn(async () => Response.json({ version: "1.2.4" }));
 		vi.stubGlobal("fetch", fetchMock);
 
 		await expect(getLatestPiVersion("1.2.3")).resolves.toBe("1.2.4");
 		expect(fetchMock).toHaveBeenCalledWith(
-			"https://pi.dev/api/latest-version",
+			"https://registry.npmjs.org/%40codex-infinity%2Fpi-infinity/latest",
 			expect.objectContaining({
 				headers: expect.objectContaining({
 					"User-Agent": expect.stringMatching(/^pi\/1\.2\.3 /),
@@ -56,12 +57,40 @@ describe("version checks", () => {
 		);
 	});
 
-	it("skips api calls when version checks are disabled", async () => {
+	it("does not let an upstream response replace the fork package", async () => {
+		const fetchMock = vi.fn(async () =>
+			Response.json({
+				packageName: "@new-scope/pi",
+				version: "1.2.4",
+			}),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(getLatestPiRelease("1.2.3")).resolves.toEqual({ version: "1.2.4" });
+	});
+
+	it("returns update notes from the version check api", async () => {
+		const fetchMock = vi.fn(async () => Response.json({ note: " **Read this** ", version: "1.2.4" }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(getLatestPiRelease("1.2.3")).resolves.toEqual({ note: "**Read this**", version: "1.2.4" });
+	});
+
+	it("skips automatic api calls when version checks are disabled", async () => {
 		process.env.PI_SKIP_VERSION_CHECK = "1";
 		const fetchMock = vi.fn();
 		vi.stubGlobal("fetch", fetchMock);
 
-		await expect(getLatestPiVersion("1.2.3")).resolves.toBeUndefined();
+		await expect(checkForNewPiVersion("1.2.3")).resolves.toBeUndefined();
 		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("allows direct api calls when automatic version checks are disabled", async () => {
+		process.env.PI_SKIP_VERSION_CHECK = "1";
+		const fetchMock = vi.fn(async () => Response.json({ version: "1.2.4" }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(getLatestPiVersion("1.2.3")).resolves.toBe("1.2.4");
+		expect(fetchMock).toHaveBeenCalledOnce();
 	});
 });

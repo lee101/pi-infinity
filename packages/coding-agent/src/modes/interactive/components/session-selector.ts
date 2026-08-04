@@ -12,14 +12,14 @@ import {
 	Text,
 	truncateToWidth,
 	visibleWidth,
-} from "@mariozechner/pi-tui";
-import { KeybindingsManager } from "../../../core/keybindings.js";
-import type { SessionInfo, SessionListProgress } from "../../../core/session-manager.js";
-import { canonicalizePath as _canonicalizePath } from "../../../utils/paths.js";
-import { theme } from "../theme/theme.js";
-import { DynamicBorder } from "./dynamic-border.js";
-import { keyHint, keyText } from "./keybinding-hints.js";
-import { filterAndSortSessions, hasSessionName, type NameFilter, type SortMode } from "./session-selector-search.js";
+} from "@earendil-works/pi-tui";
+import { KeybindingsManager } from "../../../core/keybindings.ts";
+import type { SessionInfo, SessionListProgress } from "../../../core/session-manager.ts";
+import { canonicalizePath as _canonicalizePath } from "../../../utils/paths.ts";
+import { theme } from "../theme/theme.ts";
+import { DynamicBorder } from "./dynamic-border.ts";
+import { keyHint, keyText } from "./keybinding-hints.ts";
+import { filterAndSortSessions, hasSessionName, type NameFilter, type SortMode } from "./session-selector-search.ts";
 
 type SessionScope = "current" | "all";
 
@@ -190,6 +190,7 @@ class SessionSelectorHeader implements Component {
 interface SessionTreeNode {
 	session: SessionInfo;
 	children: SessionTreeNode[];
+	latestActivity: number;
 }
 
 /** Flattened node for display with tree structure info */
@@ -210,7 +211,7 @@ function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
 
 	for (const session of sessions) {
 		const sessionPath = canonicalizePath(session.path) ?? session.path;
-		byPath.set(sessionPath, { session, children: [] });
+		byPath.set(sessionPath, { session, children: [], latestActivity: session.modified.getTime() });
 	}
 
 	const roots: SessionTreeNode[] = [];
@@ -227,9 +228,22 @@ function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
 		}
 	}
 
-	// Sort children and roots by modified date (descending)
+	const updateLatestActivity = (node: SessionTreeNode): number => {
+		let latestActivity = node.session.modified.getTime();
+		for (const child of node.children) {
+			latestActivity = Math.max(latestActivity, updateLatestActivity(child));
+		}
+		node.latestActivity = latestActivity;
+		return latestActivity;
+	};
+
+	for (const root of roots) {
+		updateLatestActivity(root);
+	}
+
+	// Sort children and roots by latest activity in each subtree (descending)
 	const sortNodes = (nodes: SessionTreeNode[]): void => {
-		nodes.sort((a, b) => b.session.modified.getTime() - a.session.modified.getTime());
+		nodes.sort((a, b) => b.latestActivity - a.latestActivity);
 		for (const node of nodes) {
 			sortNodes(node.children);
 		}
@@ -694,7 +708,6 @@ export class SessionSelectorComponent extends Container implements Focusable {
 	private allSessions: SessionInfo[] | null = null;
 	private currentSessionsLoader: SessionsLoader;
 	private allSessionsLoader: SessionsLoader;
-	private onCancel: () => void;
 	private requestRender: () => void;
 	private renameSession?: (sessionPath: string, currentName: string | undefined) => Promise<void>;
 	private currentLoading = false;
@@ -751,7 +764,6 @@ export class SessionSelectorComponent extends Container implements Focusable {
 		this.keybindings = options?.keybindings ?? KeybindingsManager.create();
 		this.currentSessionsLoader = currentSessionsLoader;
 		this.allSessionsLoader = allSessionsLoader;
-		this.onCancel = onCancel;
 		this.requestRender = requestRender;
 		this.header = new SessionSelectorHeader(this.scope, this.sortMode, this.nameFilter, this.requestRender);
 		const renameSession = options?.renameSession;
@@ -948,10 +960,6 @@ export class SessionSelectorComponent extends Container implements Focusable {
 			this.header.setLoading(false);
 			this.sessionList.setSessions(sessions, showCwd);
 			this.requestRender();
-
-			if (scope === "all" && sessions.length === 0 && (this.currentSessions?.length ?? 0) === 0) {
-				this.onCancel();
-			}
 		} catch (err) {
 			if (scope === "current") {
 				this.currentLoading = false;

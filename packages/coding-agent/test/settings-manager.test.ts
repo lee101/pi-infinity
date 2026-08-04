@@ -2,7 +2,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { SettingsManager } from "../src/core/settings-manager.js";
+import { DEFAULT_HTTP_IDLE_TIMEOUT_MS } from "../src/core/http-dispatcher.ts";
+import { SettingsManager } from "../src/core/settings-manager.ts";
 
 describe("SettingsManager", () => {
 	const testDir = join(process.cwd(), "test-settings-tmp");
@@ -197,6 +198,24 @@ describe("SettingsManager", () => {
 		});
 	});
 
+	describe("theme setting", () => {
+		it("stores slash-separated automatic theme settings separately from fixed theme names", async () => {
+			const settingsPath = join(agentDir, "settings.json");
+			writeFileSync(settingsPath, JSON.stringify({ theme: "light/dark" }));
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getTheme()).toBeUndefined();
+			expect(manager.getThemeSetting()).toBe("light/dark");
+
+			manager.setTheme("solarized-light/tokyo-night");
+			await manager.flush();
+
+			const savedSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+			expect(savedSettings.theme).toBe("solarized-light/tokyo-night");
+		});
+	});
+
 	describe("error tracking", () => {
 		it("should collect and clear load errors via drainErrors", () => {
 			const globalSettingsPath = join(agentDir, "settings.json");
@@ -210,6 +229,61 @@ describe("SettingsManager", () => {
 			expect(errors).toHaveLength(2);
 			expect(errors.map((e) => e.scope).sort()).toEqual(["global", "project"]);
 			expect(manager.drainErrors()).toEqual([]);
+		});
+	});
+
+	describe("project trust", () => {
+		it("should skip project settings when project is not trusted", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ theme: "global" }));
+			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ theme: "project" }));
+
+			const manager = SettingsManager.create(projectDir, agentDir, { projectTrusted: false });
+
+			expect(manager.isProjectTrusted()).toBe(false);
+			expect(manager.getTheme()).toBe("global");
+			expect(manager.getProjectSettings()).toEqual({});
+		});
+
+		it("should reload project settings after trust changes to true", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ theme: "global" }));
+			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ theme: "project" }));
+			const manager = SettingsManager.create(projectDir, agentDir, { projectTrusted: false });
+
+			manager.setProjectTrusted(true);
+
+			expect(manager.isProjectTrusted()).toBe(true);
+			expect(manager.getTheme()).toBe("project");
+		});
+
+		it("should fail project settings writes when project is not trusted", async () => {
+			const projectSettingsPath = join(projectDir, ".pi", "settings.json");
+			writeFileSync(projectSettingsPath, JSON.stringify({ packages: ["npm:existing"] }));
+			const manager = SettingsManager.create(projectDir, agentDir, { projectTrusted: false });
+
+			expect(() => manager.setProjectPackages(["npm:new"])).toThrow(
+				"Project is not trusted; refusing to write project settings",
+			);
+			await manager.flush();
+
+			expect(manager.getProjectSettings()).toEqual({});
+			expect(JSON.parse(readFileSync(projectSettingsPath, "utf-8"))).toEqual({ packages: ["npm:existing"] });
+		});
+
+		it("should read default project trust from global settings only", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ defaultProjectTrust: "always" }));
+			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ defaultProjectTrust: "never" }));
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getDefaultProjectTrust()).toBe("always");
+		});
+
+		it("should default invalid project trust settings to ask", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ defaultProjectTrust: "sometimes" }));
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getDefaultProjectTrust()).toBe("ask");
 		});
 	});
 
@@ -254,6 +328,130 @@ describe("SettingsManager", () => {
 
 			// And settings file should be created
 			expect(existsSync(join(projectDir, ".pinf", "settings.json"))).toBe(true);
+		});
+	});
+
+	describe("httpIdleTimeoutMs", () => {
+		it("should default to 5 minutes", () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getHttpIdleTimeoutMs()).toBe(DEFAULT_HTTP_IDLE_TIMEOUT_MS);
+		});
+
+		it("should use merged global and project settings", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ httpIdleTimeoutMs: 300000 }));
+			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ httpIdleTimeoutMs: 0 }));
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getHttpIdleTimeoutMs()).toBe(0);
+		});
+
+		it("should reject invalid timeout values", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ httpIdleTimeoutMs: -1 }));
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(() => manager.getHttpIdleTimeoutMs()).toThrow("Invalid httpIdleTimeoutMs setting");
+		});
+	});
+
+	describe("externalEditor", () => {
+		const originalVisual = process.env.VISUAL;
+		const originalEditor = process.env.EDITOR;
+		const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+
+		function setEditorEnv(visual?: string, editor?: string): void {
+			if (visual === undefined) delete process.env.VISUAL;
+			else process.env.VISUAL = visual;
+			if (editor === undefined) delete process.env.EDITOR;
+			else process.env.EDITOR = editor;
+		}
+
+		afterEach(() => {
+			setEditorEnv(originalVisual, originalEditor);
+			if (originalPlatform) {
+				Object.defineProperty(process, "platform", originalPlatform);
+			}
+		});
+
+		it("should resolve editor commands by precedence", () => {
+			setEditorEnv("vim", "nano");
+			expect(SettingsManager.inMemory({ externalEditor: "code --wait" }).getExternalEditorCommand()).toBe(
+				"code --wait",
+			);
+			expect(SettingsManager.inMemory().getExternalEditorCommand()).toBe("vim");
+
+			setEditorEnv(undefined, "emacs");
+			expect(SettingsManager.inMemory().getExternalEditorCommand()).toBe("emacs");
+		});
+
+		it("should fall back to platform defaults", () => {
+			setEditorEnv();
+			Object.defineProperty(process, "platform", { value: "win32" });
+			expect(SettingsManager.inMemory().getExternalEditorCommand()).toBe("notepad");
+
+			Object.defineProperty(process, "platform", { value: "darwin" });
+			expect(SettingsManager.inMemory().getExternalEditorCommand()).toBe("nano");
+
+			Object.defineProperty(process, "platform", { value: "linux" });
+			expect(SettingsManager.inMemory().getExternalEditorCommand()).toBe("nano");
+		});
+	});
+
+	describe("UI mode", () => {
+		it("defaults to regular and persists fullscreen mode", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getUiMode()).toBe("regular");
+
+			manager.setUiMode("fullscreen");
+			await manager.flush();
+
+			expect(manager.getUiMode()).toBe("fullscreen");
+			const savedSettings = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"));
+			expect(savedSettings.uiMode).toBe("fullscreen");
+		});
+
+		it("falls back to regular for unsupported values", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ uiMode: "other" }));
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getUiMode()).toBe("regular");
+		});
+	});
+
+	it("validates and persists the fullscreen scrollbar mode", async () => {
+		const manager = SettingsManager.create(projectDir, agentDir);
+		expect(manager.getFullscreenScrollbar()).toBe("auto");
+
+		manager.setFullscreenScrollbar("hidden");
+		await manager.flush();
+		expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8")).fullscreenScrollbar).toBe("hidden");
+
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ fullscreenScrollbar: "sometimes" }));
+		expect(SettingsManager.create(projectDir, agentDir).getFullscreenScrollbar()).toBe("auto");
+	});
+
+	describe("outputPad", () => {
+		it("should default to 1 and persist binary values", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getOutputPad()).toBe(1);
+
+			manager.setOutputPad(0);
+			await manager.flush();
+
+			expect(manager.getOutputPad()).toBe(0);
+			const savedSettings = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"));
+			expect(savedSettings.outputPad).toBe(0);
+		});
+
+		it("should treat unsupported outputPad values as default padding", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ outputPad: 2 }));
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getOutputPad()).toBe(1);
 		});
 	});
 
@@ -314,6 +512,35 @@ describe("SettingsManager", () => {
 			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ sessionDir: "~/sessions" }));
 			const manager = SettingsManager.create(projectDir, agentDir);
 			expect(manager.getSessionDir()).toBe(join(homedir(), "sessions"));
+		});
+	});
+
+	describe("getShellPath", () => {
+		it("should return undefined when not set", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ theme: "dark" }));
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getShellPath()).toBeUndefined();
+		});
+
+		it("should return an absolute shellPath unchanged", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ shellPath: "/bin/zsh" }));
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getShellPath()).toBe("/bin/zsh");
+		});
+
+		it("should expand ~ in shellPath", () => {
+			writeFileSync(
+				join(agentDir, "settings.json"),
+				JSON.stringify({ shellPath: "~/.local/bin/agent-shell-sandbox" }),
+			);
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getShellPath()).toBe(join(homedir(), ".local/bin/agent-shell-sandbox"));
+		});
+
+		it("should expand a bare ~ in shellPath", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ shellPath: "~" }));
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getShellPath()).toBe(homedir());
 		});
 	});
 });

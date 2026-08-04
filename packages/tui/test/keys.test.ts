@@ -11,7 +11,7 @@ import {
 	matchesKey,
 	parseKey,
 	setKittyProtocolActive,
-} from "../src/keys.js";
+} from "../src/keys.ts";
 
 function withEnv(name: string, value: string | undefined, fn: () => void): void {
 	const previous = process.env[name];
@@ -431,6 +431,10 @@ describe("matchesKey", () => {
 			assert.strictEqual(parseKey("\x1ba"), "alt+a");
 			assert.strictEqual(matchesKey("\x1b1", "alt+1"), true);
 			assert.strictEqual(parseKey("\x1b1"), "alt+1");
+			assert.strictEqual(matchesKey("\x1b,", "alt+,"), true);
+			assert.strictEqual(parseKey("\x1b,"), "alt+,");
+			assert.strictEqual(matchesKey("\x1b.", "alt+."), true);
+			assert.strictEqual(parseKey("\x1b."), "alt+.");
 			assert.strictEqual(matchesKey("\x1by", "alt+y"), true);
 			assert.strictEqual(parseKey("\x1by"), "alt+y");
 			assert.strictEqual(matchesKey("\x1bz", "alt+z"), true);
@@ -451,6 +455,10 @@ describe("matchesKey", () => {
 			assert.strictEqual(parseKey("\x1ba"), undefined);
 			assert.strictEqual(matchesKey("\x1b1", "alt+1"), false);
 			assert.strictEqual(parseKey("\x1b1"), undefined);
+			assert.strictEqual(matchesKey("\x1b,", "alt+,"), false);
+			assert.strictEqual(parseKey("\x1b,"), undefined);
+			assert.strictEqual(matchesKey("\x1b.", "alt+."), false);
+			assert.strictEqual(parseKey("\x1b."), undefined);
 			assert.strictEqual(matchesKey("\x1by", "alt+y"), false);
 			assert.strictEqual(parseKey("\x1by"), undefined);
 			setKittyProtocolActive(false);

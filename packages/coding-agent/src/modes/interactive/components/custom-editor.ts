@@ -1,5 +1,5 @@
-import { Editor, type EditorOptions, type EditorTheme, type TUI } from "@mariozechner/pi-tui";
-import type { AppKeybinding, KeybindingsManager } from "../../../core/keybindings.js";
+import { Editor, type EditorOptions, type EditorTheme, type TUI } from "@earendil-works/pi-tui";
+import type { AppKeybinding, KeybindingsManager } from "../../../core/keybindings.ts";
 
 /**
  * Custom editor that handles app-level keybindings for coding-agent.
@@ -33,7 +33,7 @@ export class CustomEditor extends Editor {
 			return;
 		}
 
-		// Check for paste image keybinding
+		// Check for clipboard paste keybinding
 		if (this.keybindings.matches(data, "app.clipboard.pasteImage")) {
 			this.onPasteImage?.();
 			return;

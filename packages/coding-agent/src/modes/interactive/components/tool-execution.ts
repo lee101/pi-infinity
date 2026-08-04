@@ -1,9 +1,9 @@
-import { Box, type Component, Container, getCapabilities, Image, Spacer, Text, type TUI } from "@mariozechner/pi-tui";
-import type { ToolDefinition, ToolRenderContext } from "../../../core/extensions/types.js";
-import { createAllToolDefinitions, type ToolName } from "../../../core/tools/index.js";
-import { getTextOutput as getRenderedTextOutput } from "../../../core/tools/render-utils.js";
-import { convertToPng } from "../../../utils/image-convert.js";
-import { theme } from "../theme/theme.js";
+import { Box, type Component, Container, getCapabilities, Image, Spacer, Text, type TUI } from "@earendil-works/pi-tui";
+import type { ToolDefinition, ToolRenderContext } from "../../../core/extensions/types.ts";
+import { createAllToolDefinitions, type ToolName } from "../../../core/tools/index.ts";
+import { getTextOutput as getRenderedTextOutput } from "../../../core/tools/render-utils.ts";
+import { convertToPng } from "../../../utils/image-convert.ts";
+import { theme } from "../theme/theme.ts";
 
 export interface ToolExecutionOptions {
 	showImages?: boolean;
@@ -222,6 +222,31 @@ export class ToolExecutionComponent extends Container {
 		if (this.hideComponent) {
 			return [];
 		}
+
+		if (this.hasRendererDefinition() && this.getRenderShell() === "self") {
+			const contentLines = this.selfRenderContainer.render(width);
+			if (contentLines.length === 0 && this.imageComponents.length === 0) {
+				return [];
+			}
+
+			const lines: string[] = [];
+			if (contentLines.length > 0) {
+				lines.push("");
+				lines.push(...contentLines);
+			}
+			for (let i = 0; i < this.imageComponents.length; i++) {
+				const spacer = this.imageSpacers[i];
+				if (spacer) {
+					lines.push(...spacer.render(width));
+				}
+				const imageComponent = this.imageComponents[i];
+				if (imageComponent) {
+					lines.push(...imageComponent.render(width));
+				}
+			}
+			return lines;
+		}
+
 		return super.render(width);
 	}
 

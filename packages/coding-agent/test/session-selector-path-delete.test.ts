@@ -1,12 +1,12 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setKeybindings } from "@mariozechner/pi-tui";
+import { setKeybindings } from "@earendil-works/pi-tui";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { KeybindingsManager } from "../src/core/keybindings.js";
-import type { SessionInfo } from "../src/core/session-manager.js";
-import { SessionSelectorComponent } from "../src/modes/interactive/components/session-selector.js";
-import { initTheme } from "../src/modes/interactive/theme/theme.js";
+import { KeybindingsManager } from "../src/core/keybindings.ts";
+import type { SessionInfo } from "../src/core/session-manager.ts";
+import { SessionSelectorComponent } from "../src/modes/interactive/components/session-selector.ts";
+import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 
 type Deferred<T> = {
 	promise: Promise<T>;
@@ -280,6 +280,45 @@ describe("session selector path/delete interactions", () => {
 		const output = stripAnsi(selector.render(120).join("\n"));
 		expect(output).toContain("Parent");
 		expect(output).toContain("└─ Child");
+	});
+
+	it("sorts threaded sessions by latest activity in their subtree", async () => {
+		const parentOne = makeSession({
+			id: "parent-one",
+			name: "Parent one",
+			modified: new Date("2026-01-02T00:00:00.000Z"),
+		});
+		const parentTwo = makeSession({
+			id: "parent-two",
+			name: "Parent two",
+			modified: new Date("2026-01-01T00:00:00.000Z"),
+		});
+		const childTwo = makeSession({
+			id: "child-two",
+			name: "Child two",
+			parentSessionPath: parentTwo.path,
+			modified: new Date("2026-01-03T00:00:00.000Z"),
+		});
+
+		const selector = new SessionSelectorComponent(
+			async () => [parentOne, parentTwo, childTwo],
+			async () => [],
+			() => {},
+			() => {},
+			() => {},
+			() => {},
+			{ keybindings },
+		);
+		await flushPromises();
+
+		const output = stripAnsi(selector.render(120).join("\n"));
+		const parentTwoIndex = output.indexOf("Parent two");
+		const childTwoIndex = output.indexOf("└─ Child two");
+		const parentOneIndex = output.indexOf("Parent one");
+
+		expect(parentTwoIndex).toBeGreaterThanOrEqual(0);
+		expect(childTwoIndex).toBeGreaterThan(parentTwoIndex);
+		expect(parentOneIndex).toBeGreaterThan(childTwoIndex);
 	});
 
 	it("treats the current session as active across symlink aliases", async () => {

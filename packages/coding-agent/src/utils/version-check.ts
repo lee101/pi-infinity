@@ -1,42 +1,27 @@
-import { getPiUserAgent } from "./pi-user-agent.js";
+import { compare, valid } from "semver";
+import { PACKAGE_NAME } from "../config.ts";
+import { getPiUserAgent } from "./pi-user-agent.ts";
 
-const LATEST_VERSION_URL = "https://pi.dev/api/latest-version";
+const OFFICIAL_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
+const LATEST_VERSION_URL =
+	PACKAGE_NAME === OFFICIAL_PACKAGE_NAME
+		? "https://pi.dev/api/latest-version"
+		: `https://registry.npmjs.org/${encodeURIComponent(PACKAGE_NAME)}/latest`;
 const DEFAULT_VERSION_CHECK_TIMEOUT_MS = 10000;
 
-interface ParsedVersion {
-	major: number;
-	minor: number;
-	patch: number;
-	prerelease?: string;
-}
-
-function parsePackageVersion(version: string): ParsedVersion | undefined {
-	const match = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+.*)?$/);
-	if (!match) {
-		return undefined;
-	}
-	return {
-		major: Number.parseInt(match[1], 10),
-		minor: Number.parseInt(match[2], 10),
-		patch: Number.parseInt(match[3], 10),
-		prerelease: match[4],
-	};
+export interface LatestPiRelease {
+	version: string;
+	packageName?: string;
+	note?: string;
 }
 
 export function comparePackageVersions(leftVersion: string, rightVersion: string): number | undefined {
-	const left = parsePackageVersion(leftVersion);
-	const right = parsePackageVersion(rightVersion);
+	const left = valid(leftVersion.trim());
+	const right = valid(rightVersion.trim());
 	if (!left || !right) {
 		return undefined;
 	}
-
-	if (left.major !== right.major) return left.major - right.major;
-	if (left.minor !== right.minor) return left.minor - right.minor;
-	if (left.patch !== right.patch) return left.patch - right.patch;
-	if (left.prerelease === right.prerelease) return 0;
-	if (!left.prerelease) return 1;
-	if (!right.prerelease) return -1;
-	return left.prerelease.localeCompare(right.prerelease);
+	return compare(left, right);
 }
 
 export function isNewerPackageVersion(candidateVersion: string, currentVersion: string): boolean {
@@ -47,11 +32,11 @@ export function isNewerPackageVersion(candidateVersion: string, currentVersion: 
 	return candidateVersion.trim() !== currentVersion.trim();
 }
 
-export async function getLatestPiVersion(
+export async function getLatestPiRelease(
 	currentVersion: string,
 	options: { timeoutMs?: number } = {},
-): Promise<string | undefined> {
-	if (process.env.PI_SKIP_VERSION_CHECK || process.env.PI_OFFLINE) return undefined;
+): Promise<LatestPiRelease | undefined> {
+	if (process.env.PI_OFFLINE) return undefined;
 
 	const response = await fetch(LATEST_VERSION_URL, {
 		headers: {
@@ -62,15 +47,40 @@ export async function getLatestPiVersion(
 	});
 	if (!response.ok) return undefined;
 
-	const data = (await response.json()) as { version?: unknown };
-	return typeof data.version === "string" && data.version.trim() ? data.version.trim() : undefined;
+	const data = (await response.json()) as {
+		packageName?: unknown;
+		version?: unknown;
+		note?: unknown;
+	};
+	if (typeof data.version !== "string" || !data.version.trim()) {
+		return undefined;
+	}
+	const packageName =
+		PACKAGE_NAME === OFFICIAL_PACKAGE_NAME && typeof data.packageName === "string" && data.packageName.trim()
+			? data.packageName.trim()
+			: undefined;
+	const note = typeof data.note === "string" && data.note.trim() ? data.note.trim() : undefined;
+	return {
+		version: data.version.trim(),
+		packageName,
+		...(note ? { note } : {}),
+	};
 }
 
-export async function checkForNewPiVersion(currentVersion: string): Promise<string | undefined> {
+export async function getLatestPiVersion(
+	currentVersion: string,
+	options: { timeoutMs?: number } = {},
+): Promise<string | undefined> {
+	return (await getLatestPiRelease(currentVersion, options))?.version;
+}
+
+export async function checkForNewPiVersion(currentVersion: string): Promise<LatestPiRelease | undefined> {
+	if (process.env.PI_SKIP_VERSION_CHECK) return undefined;
+
 	try {
-		const latestVersion = await getLatestPiVersion(currentVersion);
-		if (latestVersion && isNewerPackageVersion(latestVersion, currentVersion)) {
-			return latestVersion;
+		const latestRelease = await getLatestPiRelease(currentVersion);
+		if (latestRelease && isNewerPackageVersion(latestRelease.version, currentVersion)) {
+			return latestRelease;
 		}
 		return undefined;
 	} catch {

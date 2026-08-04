@@ -1,8 +1,10 @@
-import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
-import type { Transport } from "@mariozechner/pi-ai";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { Transport } from "@earendil-works/pi-ai";
 import {
+	type Component,
 	Container,
 	getCapabilities,
+	type ScrollViewScrollbar,
 	type SelectItem,
 	SelectList,
 	type SelectListLayoutOptions,
@@ -10,10 +12,18 @@ import {
 	SettingsList,
 	Spacer,
 	Text,
-} from "@mariozechner/pi-tui";
-import type { WarningSettings } from "../../../core/settings-manager.js";
-import { getSelectListTheme, getSettingsListTheme, theme } from "../theme/theme.js";
-import { DynamicBorder } from "./dynamic-border.js";
+} from "@earendil-works/pi-tui";
+import { formatHttpIdleTimeoutMs, HTTP_IDLE_TIMEOUT_CHOICES } from "../../../core/http-dispatcher.ts";
+import type { DefaultProjectTrust, UiMode, WarningSettings } from "../../../core/settings-manager.ts";
+import {
+	getSelectListTheme,
+	getSettingsListTheme,
+	parseAutoThemeSetting,
+	type TerminalTheme,
+	theme,
+} from "../theme/theme.ts";
+import { DynamicBorder } from "./dynamic-border.ts";
+import { keyDisplayText } from "./keybinding-hints.ts";
 
 const SETTINGS_SUBMENU_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	minPrimaryColumnWidth: 12,
@@ -26,8 +36,19 @@ const THINKING_DESCRIPTIONS: Record<ThinkingLevel, string> = {
 	low: "Light reasoning (~2k tokens)",
 	medium: "Moderate reasoning (~8k tokens)",
 	high: "Deep reasoning (~16k tokens)",
-	xhigh: "Maximum reasoning (~32k tokens)",
+	xhigh: "Extra-high reasoning (~32k tokens)",
+	max: "Maximum reasoning",
 };
+
+const DEFAULT_PROJECT_TRUST_LABELS: Record<DefaultProjectTrust, string> = {
+	ask: "Ask",
+	always: "Always trust",
+	never: "Never trust",
+};
+
+const DEFAULT_PROJECT_TRUST_BY_LABEL = new Map(
+	Object.entries(DEFAULT_PROJECT_TRUST_LABELS).map(([value, label]) => [label, value as DefaultProjectTrust]),
+);
 
 export interface SettingsConfig {
 	autoCompact: boolean;
@@ -39,21 +60,28 @@ export interface SettingsConfig {
 	steeringMode: "all" | "one-at-a-time";
 	followUpMode: "all" | "one-at-a-time";
 	transport: Transport;
+	httpIdleTimeoutMs: number;
 	thinkingLevel: ThinkingLevel;
 	availableThinkingLevels: ThinkingLevel[];
 	currentTheme: string;
+	terminalTheme: TerminalTheme;
 	availableThemes: string[];
 	hideThinkingBlock: boolean;
+	showCacheMissNotices: boolean;
 	collapseChangelog: boolean;
 	enableInstallTelemetry: boolean;
 	doubleEscapeAction: "fork" | "tree" | "none";
 	treeFilterMode: "default" | "no-tools" | "user-only" | "labeled-only" | "all";
 	showHardwareCursor: boolean;
 	editorPaddingX: number;
+	outputPad: 0 | 1;
 	autocompleteMaxVisible: number;
 	quietStartup: boolean;
+	defaultProjectTrust: DefaultProjectTrust;
 	clearOnShrink: boolean;
 	showTerminalProgress: boolean;
+	uiMode: UiMode;
+	fullscreenScrollbar: ScrollViewScrollbar;
 	warnings: WarningSettings;
 }
 
@@ -67,20 +95,26 @@ export interface SettingsCallbacks {
 	onSteeringModeChange: (mode: "all" | "one-at-a-time") => void;
 	onFollowUpModeChange: (mode: "all" | "one-at-a-time") => void;
 	onTransportChange: (transport: Transport) => void;
+	onHttpIdleTimeoutMsChange: (timeoutMs: number) => void;
 	onThinkingLevelChange: (level: ThinkingLevel) => void;
 	onThemeChange: (theme: string) => void;
 	onThemePreview?: (theme: string) => void;
 	onHideThinkingBlockChange: (hidden: boolean) => void;
+	onShowCacheMissNoticesChange: (shown: boolean) => void;
 	onCollapseChangelogChange: (collapsed: boolean) => void;
 	onEnableInstallTelemetryChange: (enabled: boolean) => void;
 	onDoubleEscapeActionChange: (action: "fork" | "tree" | "none") => void;
 	onTreeFilterModeChange: (mode: "default" | "no-tools" | "user-only" | "labeled-only" | "all") => void;
 	onShowHardwareCursorChange: (enabled: boolean) => void;
 	onEditorPaddingXChange: (padding: number) => void;
+	onOutputPadChange: (padding: 0 | 1) => void;
 	onAutocompleteMaxVisibleChange: (maxVisible: number) => void;
 	onQuietStartupChange: (enabled: boolean) => void;
+	onDefaultProjectTrustChange: (defaultProjectTrust: DefaultProjectTrust) => void;
 	onClearOnShrinkChange: (enabled: boolean) => void;
 	onShowTerminalProgressChange: (enabled: boolean) => void;
+	onUiModeChange: (mode: UiMode) => void;
+	onFullscreenScrollbarChange: (mode: ScrollViewScrollbar) => void;
 	onWarningsChange: (warnings: WarningSettings) => void;
 	onCancel: () => void;
 }
@@ -194,6 +228,249 @@ class SelectSubmenu extends Container {
 	}
 }
 
+function themeItems(availableThemes: string[]): SelectItem[] {
+	return availableThemes.map((name) => ({ value: name, label: name }));
+}
+
+const AUTOMATIC_THEME_VALUE = "/";
+
+function singleModeThemeItems(availableThemes: string[]): SelectItem[] {
+	return [
+		{
+			value: AUTOMATIC_THEME_VALUE,
+			label: "Automatic",
+			description: "Use separate themes for light and dark terminal appearance",
+		},
+		...themeItems(availableThemes),
+	];
+}
+
+function preferredTheme(availableThemes: string[], preferred: string | undefined, fallback: string): string {
+	if (preferred && availableThemes.includes(preferred)) return preferred;
+	if (availableThemes.includes(fallback)) return fallback;
+	return availableThemes[0] ?? fallback;
+}
+
+function defaultAutomaticThemes(
+	currentThemeSetting: string,
+	availableThemes: string[],
+): { lightTheme: string; darkTheme: string } {
+	const autoTheme = parseAutoThemeSetting(currentThemeSetting);
+	if (autoTheme) return autoTheme;
+
+	const currentFixedTheme = currentThemeSetting.includes("/") ? undefined : currentThemeSetting;
+	const themeName = preferredTheme(availableThemes, currentFixedTheme, "dark");
+	return { lightTheme: themeName, darkTheme: themeName };
+}
+
+class ThemeSubmenu extends Container {
+	private inputComponent: Component | undefined;
+	private readonly callbacks: SettingsCallbacks;
+	private readonly availableThemes: string[];
+	private readonly terminalTheme: TerminalTheme;
+	private readonly onDone: (selectedValue?: string) => void;
+	private readonly originalThemeSetting: string;
+	private mode: "single" | "automatic";
+	private singleTheme: string;
+	private lightTheme: string;
+	private darkTheme: string;
+
+	constructor(
+		currentThemeSetting: string,
+		terminalTheme: TerminalTheme,
+		availableThemes: string[],
+		callbacks: SettingsCallbacks,
+		onDone: (selectedValue?: string) => void,
+	) {
+		super();
+		this.callbacks = callbacks;
+		this.availableThemes = availableThemes;
+		this.terminalTheme = terminalTheme;
+		this.onDone = onDone;
+		this.originalThemeSetting = currentThemeSetting;
+		const autoTheme = parseAutoThemeSetting(currentThemeSetting);
+		const automaticThemes = defaultAutomaticThemes(currentThemeSetting, availableThemes);
+		const fixedTheme = autoTheme || currentThemeSetting.includes("/") ? undefined : currentThemeSetting;
+		this.mode = autoTheme ? "automatic" : "single";
+		this.lightTheme = automaticThemes.lightTheme;
+		this.darkTheme = automaticThemes.darkTheme;
+		this.singleTheme = preferredTheme(
+			availableThemes,
+			fixedTheme ?? (autoTheme ? this.getActiveAutomaticTheme() : undefined),
+			"dark",
+		);
+
+		if (this.mode === "automatic") {
+			this.showAutomaticMenu();
+		} else {
+			this.showSingleMenu();
+		}
+	}
+
+	handleInput(data: string): void {
+		this.inputComponent?.handleInput?.(data);
+	}
+
+	private setContent(renderComponent: Component, inputComponent: Component = renderComponent): void {
+		this.clear();
+		this.addChild(renderComponent);
+		this.inputComponent = inputComponent;
+	}
+
+	private showSingleMenu(): void {
+		this.mode = "single";
+		const menu = new SelectSubmenu(
+			"Theme",
+			"Select a theme, or choose Automatic to follow terminal appearance.",
+			singleModeThemeItems(this.availableThemes),
+			this.singleTheme,
+			(value) => {
+				if (value === AUTOMATIC_THEME_VALUE) {
+					this.mode = "automatic";
+					this.callbacks.onThemePreview?.(this.getThemeSetting());
+					this.showAutomaticMenu();
+					return;
+				}
+
+				this.singleTheme = value;
+				this.apply(value);
+			},
+			() => this.cancel(),
+			(value) => {
+				this.callbacks.onThemePreview?.(value === AUTOMATIC_THEME_VALUE ? this.getAutomaticThemeSetting() : value);
+			},
+		);
+		this.setContent(menu);
+	}
+
+	private showAutomaticMenu(): void {
+		this.mode = "automatic";
+		const content = new Container();
+		content.addChild(new Text(theme.bold(theme.fg("accent", "Automatic Theme")), 0, 0));
+		content.addChild(new Spacer(1));
+		content.addChild(new Text(theme.fg("muted", "Choose themes for terminal light and dark appearance."), 0, 0));
+		content.addChild(new Text(theme.fg("muted", "Light/dark detection requires terminal support."), 0, 0));
+		content.addChild(new Spacer(1));
+
+		const items: SettingItem[] = [
+			{
+				id: "light-theme",
+				label: "Light theme",
+				description: "Theme to use in automatic mode when the terminal is light",
+				currentValue: this.lightTheme,
+				submenu: (currentValue, done) =>
+					this.createThemeSelect(
+						"Light Theme",
+						"Select the theme to use for light terminal appearance",
+						currentValue,
+						done,
+						(value) => {
+							this.lightTheme = value;
+							this.callbacks.onThemePreview?.(this.getThemeSetting());
+							done(value);
+						},
+					),
+			},
+			{
+				id: "dark-theme",
+				label: "Dark theme",
+				description: "Theme to use in automatic mode when the terminal is dark",
+				currentValue: this.darkTheme,
+				submenu: (currentValue, done) =>
+					this.createThemeSelect(
+						"Dark Theme",
+						"Select the theme to use for dark terminal appearance",
+						currentValue,
+						done,
+						(value) => {
+							this.darkTheme = value;
+							this.callbacks.onThemePreview?.(this.getThemeSetting());
+							done(value);
+						},
+					),
+			},
+			{
+				id: "apply",
+				label: "Apply",
+				description: "Save and go back",
+				currentValue: "save and go back",
+				values: ["save and go back"],
+			},
+			{
+				id: "single-mode",
+				label: "Change mode",
+				description: "Switch to one theme for light and dark",
+				currentValue: "switch to single theme",
+				values: ["switch to single theme"],
+			},
+		];
+
+		const settingsList = new SettingsList(
+			items,
+			Math.min(items.length, 10),
+			getSettingsListTheme(),
+			(id) => {
+				switch (id) {
+					case "single-mode":
+						this.mode = "single";
+						this.singleTheme = this.getActiveAutomaticTheme();
+						this.callbacks.onThemePreview?.(this.singleTheme);
+						this.showSingleMenu();
+						break;
+					case "apply":
+						this.apply(this.getAutomaticThemeSetting());
+						break;
+				}
+			},
+			() => this.cancel(),
+		);
+		content.addChild(settingsList);
+		this.setContent(content, settingsList);
+	}
+
+	private createThemeSelect(
+		title: string,
+		description: string,
+		currentValue: string,
+		done: (selectedValue?: string) => void,
+		onSelect: (value: string) => void,
+	): SelectSubmenu {
+		return new SelectSubmenu(
+			title,
+			description,
+			themeItems(this.availableThemes),
+			currentValue,
+			onSelect,
+			() => {
+				this.callbacks.onThemePreview?.(this.getThemeSetting());
+				done();
+			},
+			(value) => this.callbacks.onThemePreview?.(value),
+		);
+	}
+
+	private getThemeSetting(): string {
+		return this.mode === "automatic" ? this.getAutomaticThemeSetting() : this.singleTheme;
+	}
+
+	private getActiveAutomaticTheme(): string {
+		return this.terminalTheme === "light" ? this.lightTheme : this.darkTheme;
+	}
+
+	private getAutomaticThemeSetting(): string {
+		return `${this.lightTheme}/${this.darkTheme}`;
+	}
+
+	private apply(themeSetting: string): void {
+		this.onDone(themeSetting);
+	}
+
+	private cancel(): void {
+		this.callbacks.onThemePreview?.(this.originalThemeSetting);
+		this.onDone();
+	}
+}
+
 /**
  * Main settings selector component.
  */
@@ -204,6 +481,7 @@ export class SettingsSelectorComponent extends Container {
 		super();
 
 		const supportsImages = getCapabilities().images;
+		const followUpKey = keyDisplayText("app.message.followUp");
 		let currentWarnings = { ...config.warnings };
 
 		const items: SettingItem[] = [
@@ -225,8 +503,7 @@ export class SettingsSelectorComponent extends Container {
 			{
 				id: "follow-up-mode",
 				label: "Follow-up mode",
-				description:
-					"Alt+Enter queues follow-up messages until agent stops. 'one-at-a-time': deliver one, wait for response. 'all': deliver all at once.",
+				description: `${followUpKey} queues follow-up messages until agent stops. 'one-at-a-time': deliver one, wait for response. 'all': deliver all at once.`,
 				currentValue: config.followUpMode,
 				values: ["one-at-a-time", "all"],
 			},
@@ -235,13 +512,28 @@ export class SettingsSelectorComponent extends Container {
 				label: "Transport",
 				description: "Preferred transport for providers that support multiple transports",
 				currentValue: config.transport,
-				values: ["sse", "websocket", "auto"],
+				values: ["sse", "websocket", "websocket-cached", "auto"],
+			},
+			{
+				id: "http-idle-timeout",
+				label: "HTTP idle timeout",
+				description:
+					"Maximum idle gap while waiting for HTTP headers or body chunks. Disable for local models that pause longer than five minutes.",
+				currentValue: formatHttpIdleTimeoutMs(config.httpIdleTimeoutMs),
+				values: HTTP_IDLE_TIMEOUT_CHOICES.map((choice) => choice.label),
 			},
 			{
 				id: "hide-thinking",
 				label: "Hide thinking",
 				description: "Hide thinking blocks in assistant responses",
 				currentValue: config.hideThinkingBlock ? "true" : "false",
+				values: ["true", "false"],
+			},
+			{
+				id: "cache-miss-notices",
+				label: "Cache miss notices",
+				description: "Show transcript notices for significant prompt-cache misses",
+				currentValue: config.showCacheMissNotices ? "true" : "false",
 				values: ["true", "false"],
 			},
 			{
@@ -264,6 +556,13 @@ export class SettingsSelectorComponent extends Container {
 				description: "Send an anonymous version/update ping after changelog-detected updates",
 				currentValue: config.enableInstallTelemetry ? "true" : "false",
 				values: ["true", "false"],
+			},
+			{
+				id: "default-project-trust",
+				label: "Default project trust",
+				description: "Fallback behavior when no extension or saved trust decision decides project trust",
+				currentValue: DEFAULT_PROJECT_TRUST_LABELS[config.defaultProjectTrust],
+				values: Object.values(DEFAULT_PROJECT_TRUST_LABELS),
 			},
 			{
 				id: "double-escape-action",
@@ -317,33 +616,26 @@ export class SettingsSelectorComponent extends Container {
 					),
 			},
 			{
+				id: "ui-mode",
+				label: "UI mode",
+				description: "Interface layout; fullscreen mode is experimental",
+				currentValue: config.uiMode,
+				values: ["regular", "fullscreen"],
+			},
+			{
+				id: "fullscreen-scrollbar",
+				label: "Fullscreen scrollbar",
+				description: "Scrollbar behavior in fullscreen mode; has no effect in regular mode",
+				currentValue: config.fullscreenScrollbar,
+				values: ["auto", "always", "hidden"],
+			},
+			{
 				id: "theme",
 				label: "Theme",
 				description: "Color theme for the interface",
 				currentValue: config.currentTheme,
 				submenu: (currentValue, done) =>
-					new SelectSubmenu(
-						"Theme",
-						"Select color theme",
-						config.availableThemes.map((t) => ({
-							value: t,
-							label: t,
-						})),
-						currentValue,
-						(value) => {
-							callbacks.onThemeChange(value);
-							done(value);
-						},
-						() => {
-							// Restore original theme on cancel
-							callbacks.onThemePreview?.(currentValue);
-							done();
-						},
-						(value) => {
-							// Preview theme on selection change
-							callbacks.onThemePreview?.(value);
-						},
-					),
+					new ThemeSubmenu(currentValue, config.terminalTheme, config.availableThemes, callbacks, done),
 			},
 		];
 
@@ -415,9 +707,19 @@ export class SettingsSelectorComponent extends Container {
 			values: ["0", "1", "2", "3"],
 		});
 
-		// Autocomplete max visible toggle (insert after editor-padding)
+		// Output padding toggle (insert after editor-padding)
 		const editorPaddingIndex = items.findIndex((item) => item.id === "editor-padding");
 		items.splice(editorPaddingIndex + 1, 0, {
+			id: "output-padding",
+			label: "Output padding",
+			description: "Horizontal padding for user messages, assistant messages, and thinking",
+			currentValue: String(config.outputPad),
+			values: ["0", "1"],
+		});
+
+		// Autocomplete max visible toggle (insert after output-padding)
+		const outputPaddingIndex = items.findIndex((item) => item.id === "output-padding");
+		items.splice(outputPaddingIndex + 1, 0, {
 			id: "autocomplete-max-visible",
 			label: "Autocomplete max items",
 			description: "Max visible items in autocomplete dropdown (3-20)",
@@ -481,8 +783,18 @@ export class SettingsSelectorComponent extends Container {
 					case "transport":
 						callbacks.onTransportChange(newValue as Transport);
 						break;
+					case "http-idle-timeout": {
+						const choice = HTTP_IDLE_TIMEOUT_CHOICES.find((item) => item.label === newValue);
+						if (choice) {
+							callbacks.onHttpIdleTimeoutMsChange(choice.timeoutMs);
+						}
+						break;
+					}
 					case "hide-thinking":
 						callbacks.onHideThinkingBlockChange(newValue === "true");
+						break;
+					case "cache-miss-notices":
+						callbacks.onShowCacheMissNoticesChange(newValue === "true");
 						break;
 					case "collapse-changelog":
 						callbacks.onCollapseChangelogChange(newValue === "true");
@@ -493,6 +805,13 @@ export class SettingsSelectorComponent extends Container {
 					case "install-telemetry":
 						callbacks.onEnableInstallTelemetryChange(newValue === "true");
 						break;
+					case "default-project-trust": {
+						const defaultProjectTrust = DEFAULT_PROJECT_TRUST_BY_LABEL.get(newValue);
+						if (defaultProjectTrust) {
+							callbacks.onDefaultProjectTrustChange(defaultProjectTrust);
+						}
+						break;
+					}
 					case "double-escape-action":
 						callbacks.onDoubleEscapeActionChange(newValue as "fork" | "tree");
 						break;
@@ -507,6 +826,9 @@ export class SettingsSelectorComponent extends Container {
 					case "editor-padding":
 						callbacks.onEditorPaddingXChange(parseInt(newValue, 10));
 						break;
+					case "output-padding":
+						callbacks.onOutputPadChange(newValue === "0" ? 0 : 1);
+						break;
 					case "autocomplete-max-visible":
 						callbacks.onAutocompleteMaxVisibleChange(parseInt(newValue, 10));
 						break;
@@ -515,6 +837,15 @@ export class SettingsSelectorComponent extends Container {
 						break;
 					case "terminal-progress":
 						callbacks.onShowTerminalProgressChange(newValue === "true");
+						break;
+					case "ui-mode":
+						callbacks.onUiModeChange(newValue as UiMode);
+						break;
+					case "fullscreen-scrollbar":
+						callbacks.onFullscreenScrollbarChange(newValue as ScrollViewScrollbar);
+						break;
+					case "theme":
+						callbacks.onThemeChange(newValue);
 						break;
 				}
 			},

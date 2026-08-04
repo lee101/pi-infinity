@@ -53,6 +53,9 @@ pinf "your prompt"
 - **Autonomous operation** -- `--auto-next-steps` keeps it working without intervention
 - **Idea generation** -- `--auto-next-idea` brainstorms and implements improvements
 - **AnyLLM** -- OpenAI, Anthropic, Google, local models, bring your own provider
+- **Extensible UI** -- extensions, skills, prompt templates, themes, and regular/fullscreen terminal modes
+- **Durable sessions** -- resume, fork, export, compact, and share long-running work
+- **Current Pi core** -- tracks the latest upstream agent runtime, provider catalog, auth flows, and tool fixes
 - **Local execution** -- runs entirely on your machine
 - **GPU cloud** -- deploy on [bare metal GPU hardware](https://codex-infinity.com/) for long-running sessions
 
@@ -77,21 +80,20 @@ I regularly publish my own `pi-mono` work sessions here:
 | Package | Description |
 |---------|-------------|
 | **[@codex-infinity/pi-infinity](packages/coding-agent)** | Interactive coding agent CLI |
-| **[@mariozechner/pi-ai](packages/ai)** | Unified multi-provider LLM API (OpenAI, Anthropic, Google, etc.) |
-| **[@mariozechner/pi-agent-core](packages/agent)** | Agent runtime with tool calling and state management |
-| **[@mariozechner/pi-mom](packages/mom)** | Slack bot that delegates messages to the pi coding agent |
-| **[@mariozechner/pi-tui](packages/tui)** | Terminal UI library with differential rendering |
-| **[@mariozechner/pi-web-ui](packages/web-ui)** | Web components for AI chat interfaces |
-| **[@mariozechner/pi-pods](packages/pods)** | CLI for managing vLLM deployments on GPU pods |
+| **[@earendil-works/pi-ai](packages/ai)** | Unified multi-provider LLM and image API |
+| **[@earendil-works/pi-agent-core](packages/agent)** | Agent runtime and durable harness primitives |
+| **[@earendil-works/pi-tui](packages/tui)** | Differential terminal UI library |
+| **[@earendil-works/pi-client](packages/client)** | Typed client for remote agent sessions |
+| **[@earendil-works/pi-protocol](packages/protocol)** | Shared agent protocol schemas |
 
 ## Development
 
 ```bash
-npm install          # Install all dependencies
-npm run build        # Build all packages
+npm install --ignore-scripts  # Install pinned dependencies
+npm run build:offline         # Build with the checked-in model catalog
 npm run check        # Lint, format, and type check
 ./test.sh            # Run tests (skips LLM-dependent tests without API keys)
-./pi-test.sh         # Run pi from sources (must be run from repo root)
+./pi-test.sh         # Run pinf from sources
 ```
 
 ## Contributing

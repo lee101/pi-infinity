@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { transformMessages } from "../src/providers/transform-messages.js";
-import type { AssistantMessage, Message, Model, ToolCall } from "../src/types.js";
+import { transformMessages } from "../src/api/transform-messages.ts";
+import type { AssistantMessage, Message, Model, ToolCall } from "../src/types.ts";
 
 // Normalize function matching what anthropic.ts uses
 function anthropicNormalizeToolCallId(
@@ -13,8 +13,8 @@ function anthropicNormalizeToolCallId(
 
 function makeCopilotClaudeModel(): Model<"anthropic-messages"> {
 	return {
-		id: "claude-sonnet-4",
-		name: "Claude Sonnet 4",
+		id: "claude-sonnet-4.6",
+		name: "Claude Sonnet 4.6",
 		api: "anthropic-messages",
 		provider: "github-copilot",
 		baseUrl: "https://api.individual.githubcopilot.com",
