@@ -840,8 +840,12 @@ function buildParams(
 	}
 
 	// OpenRouter provider routing preferences
-	if (model.compat?.openRouterRouting) {
-		(params as any).provider = model.compat.openRouterRouting;
+	// Default to cheapest provider unless explicit routing preferences are set.
+	if (model.baseUrl.includes("openrouter.ai")) {
+		(params as any).provider = {
+			sort: { by: "price", partition: "none" },
+			...compat.openRouterRouting,
+		};
 	}
 
 	// Vercel AI Gateway provider routing preferences
