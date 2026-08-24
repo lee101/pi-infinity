@@ -72,6 +72,7 @@
 ### Changed
 
 - Added optional cancellation to `ModelsStore` reads, writes, and deletions; catalog orchestration binds these waits to the provider refresh signal.
+- Changed OpenRouter requests to sort providers by lowest price by default, while preserving explicit routing preferences.
 
 ### Fixed
 
@@ -1029,10 +1030,6 @@ Migration guide:
 - Fixed Anthropic thinking disable handling to send `thinking: { type: "disabled" }` for reasoning-capable models when thinking is explicitly off, and added payload and env-gated end-to-end coverage for the Anthropic provider ([#2022](https://github.com/badlogic/pi-mono/issues/2022))
 - Fixed explicit thinking disable handling across Google, Google Vertex, Gemini CLI, OpenAI Responses, Azure OpenAI Responses, and OpenRouter-backed OpenAI-compatible completions. Gemini 3 models now fall back to the lowest supported thinking level when full disable is not supported, and OpenAI/OpenRouter reasoning models now send explicit `none` effort instead of relying on provider defaults ([#2490](https://github.com/badlogic/pi-mono/issues/2490))
 - Fixed OpenAI-compatible completions streams to ignore null chunks instead of crashing ([#2466](https://github.com/badlogic/pi-mono/pull/2466) by [@Cheng-Zi-Qing](https://github.com/Cheng-Zi-Qing))
-
-### Changed
-
-- Changed OpenRouter requests to sort providers by lowest price by default, while preserving explicit routing preferences.
 
 ## [0.61.1] - 2026-03-20
 
