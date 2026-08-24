@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+import { getNativeModuleCandidates } from "./native-module-path.ts";
 
 const cjsRequire = createRequire(import.meta.url);
 
@@ -21,19 +21,19 @@ function isNativeModifiersHelper(value: unknown): value is NativeModifiersHelper
 function loadNativeModifiersHelper(): NativeModifiersHelper | undefined {
 	if (nativeModifiersHelper !== undefined) return nativeModifiersHelper ?? undefined;
 	nativeModifiersHelper = null;
-	if (process.platform !== "darwin") return undefined;
 	const arch = process.arch;
 	if (arch !== "x64" && arch !== "arm64") return undefined;
 
-	const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-	const nativePath = path.join("native", "darwin", "prebuilds", `darwin-${arch}`, "darwin-modifiers.node");
-	const candidates = [
-		path.join(moduleDir, "..", nativePath),
-		path.join(moduleDir, nativePath),
-		path.join(path.dirname(process.execPath), nativePath),
-	];
+	let nativePath: string;
+	if (process.platform === "darwin") {
+		nativePath = path.join("native", "darwin", "prebuilds", `darwin-${arch}`, "darwin-modifiers.node");
+	} else if (process.platform === "win32") {
+		nativePath = path.join("native", "win32", "prebuilds", `win32-${arch}`, "win32-console-mode.node");
+	} else {
+		return undefined;
+	}
 
-	for (const modulePath of candidates) {
+	for (const modulePath of getNativeModuleCandidates(nativePath)) {
 		try {
 			const helper = cjsRequire(modulePath) as unknown;
 			if (isNativeModifiersHelper(helper)) {

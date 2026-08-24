@@ -16,6 +16,7 @@ import { getCustomThemesDir, getThemesDir } from "../../../config.ts";
 import type { SourceInfo } from "../../../core/source-info.ts";
 import { closeWatcher, watchWithErrorHandler } from "../../../utils/fs-watch.ts";
 import { highlight, supportsLanguage } from "../../../utils/syntax-highlight.ts";
+import { stripBom } from "../../../utils/text.ts";
 
 // ============================================================================
 // Types & Schema
@@ -45,9 +46,11 @@ const ThemeJsonSchema = Type.Object({
 		dim: ColorValueSchema,
 		text: ColorValueSchema,
 		thinkingText: ColorValueSchema,
-		// Backgrounds & Content Text (11 required, 1 optional)
+		// Backgrounds & Content Text (11 required, 3 optional)
 		selectedBg: ColorValueSchema,
 		scrollbarThumb: Type.Optional(ColorValueSchema),
+		searchMatchBg: Type.Optional(ColorValueSchema),
+		searchMatchText: Type.Optional(ColorValueSchema),
 		userMessageBg: ColorValueSchema,
 		userMessageText: ColorValueSchema,
 		customMessageBg: ColorValueSchema,
@@ -119,6 +122,7 @@ export type ThemeColor =
 	| "dim"
 	| "text"
 	| "thinkingText"
+	| "searchMatchText"
 	| "userMessageText"
 	| "customMessageText"
 	| "customMessageLabel"
@@ -158,11 +162,15 @@ export type ThemeColor =
 export type ThemeBg =
 	| "selectedBg"
 	| "scrollbarThumb"
+	| "searchMatchBg"
 	| "userMessageBg"
 	| "customMessageBg"
 	| "toolPendingBg"
 	| "toolSuccessBg"
 	| "toolErrorBg";
+
+type OptionalThemeColor = "thinkingMax" | "searchMatchText";
+type OptionalThemeBg = "scrollbarThumb" | "searchMatchBg";
 
 type ColorMode = "truecolor" | "256color";
 
@@ -321,13 +329,18 @@ function resolveThemeColors<T extends Record<string, ColorValue>>(
 	return resolved as Record<keyof T, string | number>;
 }
 
-function withThemeColorFallbacks(
-	colors: ThemeJson["colors"],
-): ThemeJson["colors"] & { thinkingMax: ColorValue; scrollbarThumb: ColorValue } {
+function withThemeColorFallbacks(colors: ThemeJson["colors"]): ThemeJson["colors"] & {
+	thinkingMax: ColorValue;
+	scrollbarThumb: ColorValue;
+	searchMatchBg: ColorValue;
+	searchMatchText: ColorValue;
+} {
 	return {
 		...colors,
 		thinkingMax: colors.thinkingMax ?? colors.thinkingXhigh,
 		scrollbarThumb: colors.scrollbarThumb ?? colors.selectedBg,
+		searchMatchBg: colors.searchMatchBg ?? colors.selectedBg,
+		searchMatchText: colors.searchMatchText ?? colors.text,
 	};
 }
 
@@ -344,9 +357,10 @@ export class Theme {
 	private mode: ColorMode;
 
 	constructor(
-		fgColors: Record<ThemeColor, string | number>,
-		bgColors: Record<Exclude<ThemeBg, "scrollbarThumb">, string | number> &
-			Partial<Record<"scrollbarThumb", string | number>>,
+		fgColors: Record<Exclude<ThemeColor, OptionalThemeColor>, string | number> &
+			Partial<Record<OptionalThemeColor, string | number>>,
+		bgColors: Record<Exclude<ThemeBg, OptionalThemeBg>, string | number> &
+			Partial<Record<OptionalThemeBg, string | number>>,
 		mode: ColorMode,
 		options: { name?: string; sourcePath?: string; sourceInfo?: SourceInfo } = {},
 	) {
@@ -355,7 +369,11 @@ export class Theme {
 		this.sourceInfo = options.sourceInfo;
 		this.mode = mode;
 		this.fgColors = new Map();
-		const colors = { ...fgColors, thinkingMax: fgColors.thinkingMax ?? fgColors.thinkingXhigh };
+		const colors = {
+			...fgColors,
+			thinkingMax: fgColors.thinkingMax ?? fgColors.thinkingXhigh,
+			searchMatchText: fgColors.searchMatchText ?? fgColors.text,
+		};
 		for (const [key, value] of Object.entries(colors) as [ThemeColor, string | number][]) {
 			this.fgColors.set(key, fgAnsi(value, mode));
 		}
@@ -363,6 +381,7 @@ export class Theme {
 		const backgrounds = {
 			...bgColors,
 			scrollbarThumb: bgColors.scrollbarThumb ?? bgColors.selectedBg,
+			searchMatchBg: bgColors.searchMatchBg ?? bgColors.selectedBg,
 		};
 		for (const [key, value] of Object.entries(backgrounds) as [ThemeBg, string | number][]) {
 			this.bgColors.set(key, bgAnsi(value, mode));
@@ -456,8 +475,8 @@ function getBuiltinThemes(): Record<string, ThemeJson> {
 		const darkPath = path.join(themesDir, "dark.json");
 		const lightPath = path.join(themesDir, "light.json");
 		BUILTIN_THEMES = {
-			dark: JSON.parse(fs.readFileSync(darkPath, "utf-8")) as ThemeJson,
-			light: JSON.parse(fs.readFileSync(lightPath, "utf-8")) as ThemeJson,
+			dark: JSON.parse(stripBom(fs.readFileSync(darkPath, "utf-8"))) as ThemeJson,
+			light: JSON.parse(stripBom(fs.readFileSync(lightPath, "utf-8"))) as ThemeJson,
 		};
 	}
 	return BUILTIN_THEMES;
@@ -578,7 +597,7 @@ function parseThemeJson(label: string, json: unknown): ThemeJson {
 function parseThemeJsonContent(label: string, content: string): ThemeJson {
 	let json: unknown;
 	try {
-		json = JSON.parse(content);
+		json = JSON.parse(stripBom(content));
 	} catch (error) {
 		throw new Error(`Failed to parse theme ${label}: ${error}`);
 	}
@@ -615,6 +634,7 @@ function createTheme(themeJson: ThemeJson, mode?: ColorMode, sourcePath?: string
 	const bgColorKeys: Set<string> = new Set([
 		"selectedBg",
 		"scrollbarThumb",
+		"searchMatchBg",
 		"userMessageBg",
 		"customMessageBg",
 		"toolPendingBg",
@@ -793,13 +813,21 @@ export async function detectTerminalThemeForAuto({
 	timeoutMs,
 	env,
 }: TerminalAutoThemeDetectionOptions): Promise<TerminalTheme> {
+	let colorSchemePromise: Promise<TerminalTheme | undefined> | undefined;
 	try {
-		const colorScheme = await ui.queryTerminalColorScheme?.({ timeoutMs });
+		colorSchemePromise = ui.queryTerminalColorScheme?.({ timeoutMs });
+	} catch {
+		// Fall back to OSC 11 / COLORFGBG detection when starting the color-scheme query fails.
+	}
+	const backgroundThemePromise = detectTerminalBackgroundTheme({ ui, timeoutMs, env });
+
+	try {
+		const colorScheme = await colorSchemePromise;
 		if (colorScheme) return colorScheme;
 	} catch {
-		// Fall back to OSC 11 / COLORFGBG detection when color-scheme DSR is unsupported.
+		// Fall back to the concurrently queried OSC 11 / COLORFGBG detection.
 	}
-	return (await detectTerminalBackgroundTheme({ ui, timeoutMs, env })).theme;
+	return (await backgroundThemePromise).theme;
 }
 
 export function getDefaultTheme(): string {

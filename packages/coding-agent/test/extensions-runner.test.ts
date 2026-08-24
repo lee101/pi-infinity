@@ -1,4 +1,4 @@
-import { createModelRegistry } from "./model-runtime-test-utils.ts";
+import { createInMemoryModelRegistry } from "./model-runtime-test-utils.ts";
 /**
  * Tests for ExtensionRunner - conflict detection, error handling, tool wrapping.
  */
@@ -33,8 +33,7 @@ describe("ExtensionRunner", () => {
 		extensionsDir = path.join(tempDir, "extensions");
 		fs.mkdirSync(extensionsDir);
 		sessionManager = SessionManager.inMemory();
-		const authStorage = AuthStorage.create(path.join(tempDir, "auth.json"));
-		modelRegistry = await createModelRegistry(authStorage);
+		modelRegistry = await createInMemoryModelRegistry(AuthStorage.inMemory());
 	});
 
 	afterEach(() => {
@@ -690,6 +689,26 @@ describe("ExtensionRunner", () => {
 
 			expect(flags.get("shared-flag")?.description).toBe("first");
 			expect(result.runtime.flagValues.get("shared-flag")).toBe(true);
+		});
+
+		it("rejects default values that do not match the flag type", async () => {
+			const extCode = `
+				export default function(pi) {
+					pi.registerFlag("safe-mode", {
+						type: "boolean",
+						default: "false",
+					});
+				}
+			`;
+			fs.writeFileSync(path.join(extensionsDir, "bad-flag-default.ts"), extCode);
+
+			const result = await discoverAndLoadExtensions([], tempDir, tempDir);
+
+			expect(result.extensions).toHaveLength(0);
+			expect(result.errors[0]?.error).toContain(
+				'Invalid default for flag "safe-mode": expected boolean, got string',
+			);
+			expect(result.runtime.flagValues.has("safe-mode")).toBe(false);
 		});
 
 		it("can set flag values", async () => {

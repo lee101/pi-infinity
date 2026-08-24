@@ -18,8 +18,7 @@
 
 Two flags turn Pi into a fully autonomous coding agent:
 
-- **`--auto-next-steps`** -- After each response, automatically continues with the next logical steps (including testing)
-- **`--auto-next-idea`** -- Generates and implements new improvement ideas for your codebase
+ @ours
 
 ```shell
 # Autonomous coding -- completes tasks then moves to the next one
@@ -89,6 +88,7 @@ I regularly publish my own `pi-mono` work sessions here:
 | **[@earendil-works/pi-ai](packages/ai)** | Unified multi-provider LLM and image API |
 | **[@earendil-works/pi-agent-core](packages/agent)** | Agent runtime and durable harness primitives |
 | **[@earendil-works/pi-tui](packages/tui)** | Differential terminal UI library |
+| **[@earendil-works/pi-telemetry](packages/telemetry)** | Vendor-neutral telemetry contracts, reference adapter, conformance tests, and typed schemas |
 | **[@earendil-works/pi-client](packages/client)** | Typed client for remote agent sessions |
 | **[@earendil-works/pi-protocol](packages/protocol)** | Shared agent protocol schemas |
 

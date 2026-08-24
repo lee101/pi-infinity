@@ -44,7 +44,7 @@ type _AiThinkingContentFieldsAccountedFor = Assert<
 >;
 type _AiImageContentFieldsAccountedFor = Assert<ExactKeys<AiImageContent, "type" | "data" | "mimeType">>;
 type _AiToolCallFieldsAccountedFor = Assert<
-	ExactKeys<ToolCall, "type" | "id" | "name" | "arguments" | "thoughtSignature">
+	ExactKeys<ToolCall, "type" | "id" | "name" | "arguments" | "thoughtSignature" | "namespace">
 >;
 type _AiUsageFieldsAccountedFor = Assert<
 	ExactKeys<
@@ -91,8 +91,10 @@ type _AiAssistantMessageFieldsAccountedFor = Assert<
 		| "diagnostics"
 		| "usage"
 		| "stopReason"
+		| "deferred"
 		| "errorMessage"
 		| "rawStopReason"
+		| "endTurn"
 		| "timestamp"
 	>
 >;
@@ -308,6 +310,8 @@ export function toProtocolAssistantMessage(
 				status: "complete",
 				stopReason: message.stopReason,
 			} satisfies AssistantTranscriptItem;
+		case "deferred":
+			throw new TypeError("Deferred assistant messages are not supported by protocol v1");
 		case "error":
 			if (message.errorMessage?.length === 0) {
 				throw new TypeError("Assistant error messages must not be empty");

@@ -7,6 +7,7 @@
  */
 
 import { getProviderEnvValue } from "../../utils/provider-env.ts";
+import { sleep } from "../../utils/sleep.ts";
 import type { OAuthAuth, OAuthCredential, ProviderAuthInteraction } from "../types.ts";
 import { pollOAuthDeviceCodeFlow } from "./device-code.ts";
 
@@ -206,21 +207,6 @@ async function pollForToken(
 	});
 }
 
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-	return new Promise((resolve, reject) => {
-		signal.throwIfAborted();
-		const onAbort = () => {
-			clearTimeout(timeout);
-			reject(signal.reason);
-		};
-		const timeout = setTimeout(() => {
-			signal.removeEventListener("abort", onAbort);
-			resolve();
-		}, ms);
-		signal.addEventListener("abort", onAbort, { once: true });
-	});
-}
-
 function isRetryableRefreshFailure(response: Response): boolean {
 	return response.status === 429 || response.status >= 500;
 }
@@ -294,6 +280,7 @@ async function loginKimiCoding(interaction: ProviderAuthInteraction): Promise<OA
 
 export const kimiCodingOAuth: OAuthAuth = {
 	name: "Kimi Code (subscription)",
+	isSubscription: true,
 	loginLabel: "Sign in with Kimi Code",
 
 	login: loginKimiCoding,

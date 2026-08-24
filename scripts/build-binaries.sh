@@ -97,11 +97,17 @@ fi
 if [[ "$SKIP_DEPS" == "false" ]]; then
     echo "==> Installing cross-platform native bindings..."
     CLIPBOARD_VERSION=$(node -p "require('./packages/coding-agent/package.json').optionalDependencies['@mariozechner/clipboard']")
-    # npm ci only installs optional deps for the current platform
-    # We need the base clipboard package and all platform bindings for bun cross-compilation
-    # Use --force to bypass platform checks (os/cpu restrictions in package.json)
-    # Install all in one command to avoid npm removing packages from previous installs
-    npm install --include=optional --no-save --package-lock=false --force --ignore-scripts \
+    # npm ci only installs optional deps for the current platform. Install the
+    # cross-platform packages in isolation so npm does not re-resolve and mutate
+    # the workspace dependency graph, which can trigger npm/arborist failures.
+    NATIVE_DEPS_DIR=$(mktemp -d)
+    cleanup_native_deps() {
+        rm -rf "$NATIVE_DEPS_DIR"
+    }
+    trap cleanup_native_deps EXIT
+    printf '%s\n' '{"private":true}' > "$NATIVE_DEPS_DIR/package.json"
+    # Use --force to bypass platform checks (os/cpu restrictions in package.json).
+    npm install --prefix "$NATIVE_DEPS_DIR" --include=optional --no-save --package-lock=false --force --ignore-scripts \
         @mariozechner/clipboard@"$CLIPBOARD_VERSION" \
         @mariozechner/clipboard-darwin-arm64@"$CLIPBOARD_VERSION" \
         @mariozechner/clipboard-darwin-x64@"$CLIPBOARD_VERSION" \
@@ -109,6 +115,20 @@ if [[ "$SKIP_DEPS" == "false" ]]; then
         @mariozechner/clipboard-linux-arm64-gnu@"$CLIPBOARD_VERSION" \
         @mariozechner/clipboard-win32-x64-msvc@"$CLIPBOARD_VERSION" \
         @mariozechner/clipboard-win32-arm64-msvc@"$CLIPBOARD_VERSION"
+    mkdir -p node_modules/@mariozechner
+    for package in \
+        clipboard \
+        clipboard-darwin-arm64 \
+        clipboard-darwin-x64 \
+        clipboard-linux-x64-gnu \
+        clipboard-linux-arm64-gnu \
+        clipboard-win32-x64-msvc \
+        clipboard-win32-arm64-msvc; do
+        rm -rf "node_modules/@mariozechner/$package"
+        cp -R "$NATIVE_DEPS_DIR/node_modules/@mariozechner/$package" node_modules/@mariozechner/
+    done
+    cleanup_native_deps
+    trap - EXIT
 else
     echo "==> Skipping cross-platform native bindings (--skip-deps)"
 fi
@@ -139,40 +159,8 @@ else
     PLATFORMS=(darwin-arm64 darwin-x64 linux-x64 linux-arm64 windows-x64 windows-arm64)
 fi
 
-for platform in "${PLATFORMS[@]}"; do
-    echo "Building for $platform..."
-    bun_target="bun-$platform"
-    if [[ "$platform" == *-x64 ]]; then
-        bun_target="${bun_target}-baseline"
-    fi
-
-    # Bun compiled executables only embed worker scripts when they are passed as
-    # explicit build entrypoints. The runtime can still use new URL(...), but the
-    # worker must be present in the compiled executable.
-    if [[ "$platform" == windows-* ]]; then
-        bun build --compile --target="$bun_target" ./dist/bun/cli.js ./src/utils/image-resize-worker.ts --outfile "$OUTPUT_DIR/$platform/pi.exe"
-    else
-        bun build --compile --target="$bun_target" ./dist/bun/cli.js ./src/utils/image-resize-worker.ts --outfile "$OUTPUT_DIR/$platform/pi"
-    fi
-done
-
-echo "==> Creating release archives..."
-
-# Copy shared files to each platform directory
-for platform in "${PLATFORMS[@]}"; do
-    cp package.json "$OUTPUT_DIR/$platform/"
-    cp README.md "$OUTPUT_DIR/$platform/"
-    cp CHANGELOG.md "$OUTPUT_DIR/$platform/"
-    cp ../../node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm "$OUTPUT_DIR/$platform/"
-    mkdir -p "$OUTPUT_DIR/$platform/theme"
-    cp dist/modes/interactive/theme/*.json "$OUTPUT_DIR/$platform/theme/"
-    mkdir -p "$OUTPUT_DIR/$platform/assets"
-    cp dist/modes/interactive/assets/* "$OUTPUT_DIR/$platform/assets/"
-    cp -r dist/core/export-html "$OUTPUT_DIR/$platform/"
-    cp -r docs "$OUTPUT_DIR/$platform/"
-    cp -r examples "$OUTPUT_DIR/$platform/"
-
-    case "$platform" in
+set_clipboard_target() {
+    case "$1" in
         darwin-arm64)
             clipboard_native_package="clipboard-darwin-arm64"
             clipboard_native_file="clipboard.darwin-arm64.node"
@@ -198,9 +186,47 @@ for platform in "${PLATFORMS[@]}"; do
             clipboard_native_file="clipboard.win32-arm64-msvc.node"
             ;;
     esac
+}
+
+for platform in "${PLATFORMS[@]}"; do
+    echo "Building for $platform..."
+    bun_target="bun-$platform"
+    if [[ "$platform" == *-x64 ]]; then
+        bun_target="${bun_target}-baseline"
+    fi
+
+    # Bun compiled executables only embed worker scripts when they are passed as
+    # explicit build entrypoints. The runtime can still use new URL(...), but the
+    # worker must be present in the compiled executable.
+    #
+    # Disable cwd bunfig.toml autoload so project preload scripts cannot crash the
+    # standalone binary before pi starts (see #7684).
+    if [[ "$platform" == windows-* ]]; then
+        bun build --compile --no-compile-autoload-bunfig --target="$bun_target" ./dist/bun/cli.js ./src/utils/image-resize-worker.ts --outfile "$OUTPUT_DIR/$platform/pi.exe"
+    else
+        bun build --compile --no-compile-autoload-bunfig --target="$bun_target" ./dist/bun/cli.js ./src/utils/image-resize-worker.ts --outfile "$OUTPUT_DIR/$platform/pi"
+    fi
+done
+
+echo "==> Creating release archives..."
+
+# Copy shared files to each platform directory
+for platform in "${PLATFORMS[@]}"; do
+    cp package.json "$OUTPUT_DIR/$platform/"
+    cp README.md "$OUTPUT_DIR/$platform/"
+    cp CHANGELOG.md "$OUTPUT_DIR/$platform/"
+    cp ../../node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm "$OUTPUT_DIR/$platform/"
+    mkdir -p "$OUTPUT_DIR/$platform/theme"
+    cp dist/modes/interactive/theme/*.json "$OUTPUT_DIR/$platform/theme/"
+    mkdir -p "$OUTPUT_DIR/$platform/assets"
+    cp dist/modes/interactive/assets/* "$OUTPUT_DIR/$platform/assets/"
+    cp -r dist/core/export-html "$OUTPUT_DIR/$platform/"
+    cp -r docs "$OUTPUT_DIR/$platform/"
+    cp -r examples "$OUTPUT_DIR/$platform/"
+
+    set_clipboard_target "$platform"
     mkdir -p "$OUTPUT_DIR/$platform/node_modules/@mariozechner"
     cp -r ../../node_modules/@mariozechner/clipboard "$OUTPUT_DIR/$platform/node_modules/@mariozechner/"
-    cp -r ../../node_modules/@mariozechner/$clipboard_native_package "$OUTPUT_DIR/$platform/node_modules/@mariozechner/"
     cp "../../node_modules/@mariozechner/$clipboard_native_package/$clipboard_native_file" \
         "$OUTPUT_DIR/$platform/node_modules/@mariozechner/clipboard/"
 

@@ -3,7 +3,6 @@
 ## Conversational Style
 
 - Keep answers short and concise
-- No emojis in commits, issues, PR comments, or code
 - No fluff or cheerful filler text
 - Technical prose only, be kind but direct (e.g., "Thanks @user" not "Thanks so much @user!")
 
@@ -99,11 +98,7 @@ Location: `packages/*/CHANGELOG.md` (each package has its own)
 
 Use these sections under `## [Unreleased]`:
 
-- `### Breaking Changes` - API changes requiring migration
-- `### Added` - New features
-- `### Changed` - Changes to existing functionality
-- `### Fixed` - Bug fixes
-- `### Removed` - Removed features
+ @ours
 
 ### Rules
 
@@ -194,9 +189,7 @@ The script handles: version bump, CHANGELOG finalization, commit, tag, publish, 
 
 ## **CRITICAL** Git Rules for Parallel Agents **CRITICAL**
 
-Multiple agents may work on different files in the same worktree simultaneously. You MUST follow these rules:
 
-### Committing
 
 - **ONLY commit files YOU changed in THIS session**
 - ALWAYS include `fixes #<number>` or `closes #<number>` in the commit message when there is a related issue or PR

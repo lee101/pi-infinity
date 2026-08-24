@@ -32,6 +32,8 @@ import {
 
 export interface ExtensionOAuthConfig {
 	name: string;
+	/** Whether access through this auth method is backed by a provider subscription. */
+	isSubscription?: boolean;
 	/** @deprecated Retained for extension source compatibility; ignored by canonical auth flows. */
 	usesCallbackServer?: boolean;
 	login(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials>;
@@ -235,6 +237,7 @@ function applyExtension(
 function adaptOAuth(config: ExtensionOAuthConfig): OAuthAuth {
 	return {
 		name: config.name,
+		isSubscription: config.isSubscription,
 		login: async (callbacks) => {
 			const credential = await config.login({
 				onAuth: (info) => callbacks.notify({ type: "auth_url", ...info }),
@@ -470,7 +473,7 @@ export function composeModelProvider(
 				: api.stream(model, context, options);
 		});
 
-	return {
+	const provider: Provider = {
 		id: providerId,
 		name: extension?.name ?? config?.name ?? base?.name ?? extension?.oauth?.name ?? providerId,
 		baseUrl: extension?.baseUrl ?? config?.baseUrl ?? base?.baseUrl,
@@ -506,6 +509,17 @@ export function composeModelProvider(
 		stream: (model, context, options) => streamWith(model, context, options, false),
 		streamSimple: (model, context, options) => streamWith(model, context, options, true),
 	};
+
+	const fetchDeferred = base?.fetchDeferred;
+	if (fetchDeferred) {
+		provider.fetchDeferred = (model, handle, options) => fetchDeferred(model, handle, options);
+	}
+	const cancelDeferred = base?.cancelDeferred;
+	if (cancelDeferred) {
+		provider.cancelDeferred = (model, handle, options) => cancelDeferred(model, handle, options);
+	}
+
+	return provider;
 }
 
 export function resolveConfiguredModelHeaders(
