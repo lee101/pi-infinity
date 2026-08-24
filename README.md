@@ -35,6 +35,12 @@ pinf --auto-next-steps --auto-next-idea
 npm install -g @codex-infinity/pi-infinity
 ```
 
+Or use the installer URL:
+
+```shell
+curl -fsSL https://raw.githubusercontent.com/lee101/pi-infinity/main/install.sh | sh
+```
+
 Then run `pinf` to get started.
 
 ### Authentication
