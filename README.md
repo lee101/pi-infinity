@@ -18,7 +18,15 @@
 
 Two flags turn Pi into a fully autonomous coding agent:
 
- @ours
+| Package | Description |
+|---------|-------------|
+| **[@earendil-works/chord](packages/chord)** | Standalone application-composition runtime for services, replicated state, RPC, and plugins |
+| **[@earendil-works/pi-telemetry](packages/telemetry)** | Vendor-neutral telemetry contracts, reference adapter, conformance tests, and typed schemas |
+| **[@earendil-works/pi-ai](packages/ai)** | Unified multi-provider LLM API (OpenAI, Anthropic, Google, etc.) |
+| **[@earendil-works/pi-agent-core](packages/agent)** | Agent runtime with tool calling and state management |
+| **[@earendil-works/pi-coding-agent](packages/coding-agent)** | Interactive coding agent CLI |
+| **[@earendil-works/pi-tui](packages/tui)** | Terminal UI library with differential rendering |
+
 
 ```shell
 # Autonomous coding -- completes tasks then moves to the next one
@@ -35,6 +43,7 @@ npm install -g @codex-infinity/pi-infinity
 ```
 
 Or use the installer URL:
+
 
 ```shell
 curl -fsSL https://raw.githubusercontent.com/lee101/pi-infinity/main/install.sh | sh
