@@ -1,6 +1,6 @@
 {
 	"name": "@earendil-works/chord",
-	"version": "0.85.1",
+	"version": "0.99.2",
 	"description": "Application composition runtime for services, replicated state, RPC, and plugins",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -41,7 +41,7 @@
 	],
 	"scripts": {
 		"clean": "shx rm -rf dist",
-		"build": "tsgo -p tsconfig.build.json",
+		"build": "tsc -p tsconfig.build.json",
 		"test": "vitest --run",
 		"prepublishOnly": "npm run clean && npm run build"
 	},
@@ -63,10 +63,10 @@
 		"node": ">=22.19.0"
 	},
 	"dependencies": {
-		"esbuild": "0.28.1"
+		"esbuild": "0.28.2"
 	},
 	"devDependencies": {
 		"shx": "0.4.0",
-		"vitest": "4.1.9"
+		"vitest": "4.1.11"
 	}
 }
