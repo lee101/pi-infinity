@@ -48,11 +48,18 @@ describe("model selector", () => {
 				.split("\n")
 				.find((line) => line.includes(`${id} [`))
 				?.trimEnd();
+		const getCursorRow = (): string | undefined =>
+			stripAnsi(selector.render(120).join("\n"))
+				.split("\n")
+				.find((line) => line.startsWith("→"))
+				?.trimEnd();
 
 		expect(getModelRow("current-model")).toBe(`→ ✓ current-model [${currentModel.provider}]`);
 		selector.handleInput("\x1b[B");
-		expect(getModelRow("current-model")).toBe(`  ✓ current-model [${currentModel.provider}]`);
-		expect(getModelRow("browsed-model")).toBe(`→   browsed-model [${currentModel.provider}]`);
+		// Current model keeps its mark but loses the cursor; cursor moves to another row.
+		expect(getModelRow("current-model")?.startsWith("  ✓ current-model [")).toBe(true);
+		expect(getCursorRow()).toBeDefined();
+		expect(getCursorRow()).not.toContain("✓ current-model [");
 		selector.dispose();
 	});
 
@@ -72,7 +79,7 @@ describe("model selector", () => {
 			saveDefault,
 		);
 
-		expect(stripAnsi(selector.render(120).join("\n"))).toContain("Ctrl+R to set as default");
+		expect(stripAnsi(selector.render(120).join("\n"))).toContain("to select and remember");
 		selector.handleInput("\x13");
 		expect(saveDefault).not.toHaveBeenCalled();
 		selector.handleInput("\x12");

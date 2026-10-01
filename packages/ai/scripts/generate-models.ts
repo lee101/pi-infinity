@@ -2697,6 +2697,37 @@ async function generateModels() {
 	];
 	allModels.push(...antLingModels);
 
+	// Meta Model API is not listed on models.dev, so these are curated manually.
+	// Pricing mirrors the OpenPaths Meta catalog; the contributor tier tracks
+	// opencode-go's muse-spark-1.2-contributor pricing.
+	const metaModels: Model<"openai-completions">[] = [
+		{
+			id: "muse-spark-1.3",
+			name: "Muse Spark 1.3",
+			api: "openai-completions",
+			baseUrl: "https://api.meta.ai/v1",
+			provider: "meta",
+			reasoning: false,
+			input: ["text", "image"],
+			cost: { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
+			contextWindow: 1048576,
+			maxTokens: 131072,
+		},
+		{
+			id: "muse-spark-1.3-contributor",
+			name: "Muse Spark 1.3 Contributor",
+			api: "openai-completions",
+			baseUrl: "https://api.meta.ai/v1",
+			provider: "meta",
+			reasoning: false,
+			input: ["text", "image"],
+			cost: { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
+			contextWindow: 1048576,
+			maxTokens: 131072,
+		},
+	];
+	allModels.push(...metaModels);
+
 	for (const candidate of allModels) {
 		if (
 			candidate.api === "openai-completions" &&

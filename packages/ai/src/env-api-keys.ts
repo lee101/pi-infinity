@@ -70,6 +70,10 @@ function getApiKeyEnvVars(provider: string): readonly string[] | undefined {
 		return ["COPILOT_GITHUB_TOKEN"];
 	}
 
+	if (provider === "meta") {
+		return ["META_API_KEY", "MODEL_API_KEY"];
+	}
+
 	// ANTHROPIC_AUTH_TOKEN participates in env discovery/status, but
 	// getEnvApiKey() skips it because requests must pass it as Authorization: Bearer.
 	if (provider === "anthropic") {

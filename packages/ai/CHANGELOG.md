@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added Meta as a built-in OpenAI-compatible provider (`META_API_KEY` or `MODEL_API_KEY`) with `muse-spark-1.3` and `muse-spark-1.3-contributor`.
+
 ## [0.85.1] - 2026-09-05
 
 ### Added
