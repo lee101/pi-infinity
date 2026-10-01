@@ -39,6 +39,7 @@ import type {
 	Tx,
 	WatchHandle,
 } from "../types.ts";
+import type { TaskGraph, TaskGraphWatch } from "./task-graph.ts";
 import type { UsageState } from "./usage.ts";
 import type { ConversationView } from "./view.ts";
 
@@ -528,16 +529,17 @@ export interface Conversation {
 	/** The structural view (spec §9.3) as a disposable read-only Chord state. */
 	viewState(context: Context): Promise<AttachedReplicatedState<ConversationView>>;
 	/** The structural view as a serialized exact-frame watch with bounded pending frames. */
-	watch(context: Context): Promise<WatchHandle<ConversationView>>;
+	watch(context: Context): Promise<ConversationWatch>;
 }
 
-// TODO: decide how Harness exposes subscribeCommits() and subscribeClose(). Their listeners run on the Session line
-// and must not throw or call Session APIs, and Harness close will also join task invocations.
+export type ConversationWatch = WatchHandle<ConversationView>;
+
 /** Durable agent harness over one Session. */
 export interface Harness extends Session {
 	/**
-	 * Enable task scheduling. Idempotent; throws after close. Calls that wait for progress (`Conversation.submit()`,
-	 * `Submission.wait()`, `waitForTask()`, `waitForIdle()`) enable it too.
+	 * Enable task scheduling. Idempotent; throws after close. Calls that ask for progress enable it too:
+	 * `Conversation.submit()`, `Conversation.compact()`, `Conversation.abort()`, `Submission.wait()`, `waitForTask()`,
+	 * `Harness.waitForIdle()`, and `Conversation.waitForIdle()`. Read-only viewers never do.
 	 */
 	resume(): void;
 
@@ -571,6 +573,10 @@ export interface Harness extends Session {
 	waitForIdle(context: Context): Promise<void>;
 	/** Session total: every conversation's `pi.usage` summed. */
 	usage(context: Context): Promise<UsageState>;
+	/** Every live task with its owner edge, status, and owned conversations (spec §9.5), as a disposable Chord state. */
+	taskGraph(context: Context): Promise<AttachedReplicatedState<TaskGraph>>;
+	/** The task graph as a serialized exact-frame watch with bounded pending frames. */
+	watchTaskGraph(context: Context): Promise<TaskGraphWatch>;
 }
 
 /** What a hook may use: committed reads and the asking task's memos, which hooks and the task share. */

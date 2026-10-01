@@ -1014,7 +1014,10 @@ function planDocument(document: DocumentEntry): DocumentPlan | undefined {
 	}
 }
 
-/** Whether adoption publishes the plan: every creation, copy, and retirement, and a loaded incarnation that changed. */
+/**
+ * Whether adoption publishes the plan: every creation, copy, and retirement, and a loaded incarnation that writes
+ * content, which includes a migration-only base so observers of the older shape receive the new value.
+ */
 function publishes(plan: DocumentPlan): boolean {
-	return plan.retire || plan.change?.loaded === undefined || plan.change.prepared.ops.length > 0;
+	return plan.retire || plan.change?.loaded === undefined || plan.content !== undefined;
 }

@@ -888,6 +888,15 @@ function splitIntoTokensWithAnsi(text: string): string[] {
  * @param width - Maximum visible width per line
  * @returns Array of wrapped lines (NOT padded to width)
  */
+/**
+ * Flatten cached lines. V8 keeps a string built by concatenation as a tree of its parts until something reads it
+ * whole, and a cached line kept as such a tree retains several times its own size. Converting a string to a number
+ * reads it whole, so V8 flattens it in place; the strings' values do not change.
+ */
+export function flattenLines(lines: readonly string[]): void {
+	for (const line of lines) Number(line);
+}
+
 export function wrapTextWithAnsi(text: string, width: number): string[] {
 	if (!text) {
 		return [""];

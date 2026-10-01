@@ -28,6 +28,7 @@ Built on [`@earendil-works/pi-ai`](../ai/README.md) for model access and `@earen
 - [More Conversations and Forks](#more-conversations-and-forks)
 - [Abort and Subagents](#abort-and-subagents)
 - [Child Tasks](#child-tasks)
+- [Task Graph](#task-graph)
 - [Your Own State](#your-own-state)
 - [Usage and Cost](#usage-and-cost)
 - [Storage](#storage)
@@ -466,6 +467,22 @@ decide: async (task, runtime, context) => {
 - **Aborting:** abort runs bottom-up. Aborting a task aborts the work it owns first, and its own abort handler starts only once that work is done, so each task undoes its own effects.
 
 [`24-child-tasks.ts`](test/examples/24-child-tasks.ts) runs a checkout with four payments: a declined card, a cancelled checkout, and a restart while the payments run.
+
+## Task Graph
+
+`harness.taskGraph(context)` shows every live task of the Session as one Chord state, for a task panel or debugging. Each node has its owner edge (`owner` task, or none for a task its conversation owns), its status, whether it is `background` or abort-marked, and the conversations it owns. `harness.watchTaskGraph(context)` delivers the same value as a watch, like a conversation's `watch()`.
+
+```typescript
+const graph = await harness.taskGraph(context);
+graph.subscribe((value) => {
+	for (const node of Object.values(value.tasks)) {
+		const status = node.state.status === "waiting" ? `waiting on ${node.state.on.join(", ")}` : node.state.status;
+		console.log(`${node.id} ${node.kind} ${status}`, node.owner ?? `conversation ${node.conversationId}`);
+	}
+});
+```
+
+A task appears with the commit that creates it and leaves with the commit that makes it terminal. Statuses are the committed ones: `pending`, `running`, `waiting` (with `on` and `policy`), and `completing` (with the held outcome's status). After a restart, tasks that were `running` show as `pending` until they run again. Whether a pending task is blocked by a missing definition is not part of the graph; `harness.inspect()` reports that. The graph lists live tasks only: once a subagent's owner task is terminal, a later task in its conversation is a top-level node, and the conversation's `ConversationRecord.owner` (also in its view's `conversation`) links it to its parent. [`24-child-tasks.ts`](test/examples/24-child-tasks.ts) prints the checkout's tree while its payments run.
 
 ## Your Own State
 

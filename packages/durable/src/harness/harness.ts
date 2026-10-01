@@ -18,7 +18,6 @@ import type {
 	TaskId,
 	TaskRecord,
 	Tx,
-	WatchHandle,
 } from "../types.ts";
 import { ROOT_CONVERSATION_ID } from "../types.ts";
 import { AgentDoc, configure, createAgent, resolveAgent, resolveSettings } from "./agent.ts";
@@ -29,6 +28,7 @@ import { LiveDoc, settleSchedulerOutcome } from "./live.ts";
 import { BUILTIN_TASKS } from "./registry.ts";
 import { type InvocationBinding, TaskScheduler } from "./scheduler.ts";
 import { Submissions } from "./submissions.ts";
+import { type TaskGraph, TaskGraphView, type TaskGraphWatch } from "./task-graph.ts";
 import type {
 	Agent,
 	AgentChange,
@@ -39,6 +39,7 @@ import type {
 	ConversationCreateOptions,
 	ConversationHandle,
 	ConversationInit,
+	ConversationWatch,
 	HarnessInspection,
 	HarnessOptions,
 	Harness as HarnessType,
@@ -154,7 +155,7 @@ class ConversationImpl<Tool extends ToolRegistration> implements Conversation {
 		return this.#host.views.state(this.id, context);
 	}
 
-	watch(context: Context): Promise<WatchHandle<ConversationView>> {
+	watch(context: Context): Promise<ConversationWatch> {
 		return this.#host.views.watch(this.id, context);
 	}
 }
@@ -167,6 +168,7 @@ class HarnessImpl<Tool extends ToolRegistration> extends SessionImpl implements 
 	readonly #host: ConversationHost<Tool>;
 	readonly #tasks: TaskScheduler;
 	readonly #submissions: Submissions;
+	readonly #taskGraph: TaskGraphView;
 	#closed = false;
 
 	constructor(storage: Storage, options: HarnessOptions<Tool>, context: Context) {
@@ -195,6 +197,7 @@ class HarnessImpl<Tool extends ToolRegistration> extends SessionImpl implements 
 			context: withoutAbortSignal(context),
 		});
 		this.#submissions = new Submissions(this, storage, now, settings, () => this.#tasks.resume());
+		this.#taskGraph = new TaskGraphView(this, storage);
 		this.#host = {
 			harness: this,
 			storage,
@@ -288,6 +291,14 @@ class HarnessImpl<Tool extends ToolRegistration> extends SessionImpl implements 
 			if (state !== undefined) addUsageState(total, state);
 		}
 		return total;
+	}
+
+	taskGraph(context: Context): Promise<AttachedReplicatedState<TaskGraph>> {
+		return this.#taskGraph.state(context);
+	}
+
+	watchTaskGraph(context: Context): Promise<TaskGraphWatch> {
+		return this.#taskGraph.watch(context);
 	}
 
 	root(
@@ -411,7 +422,10 @@ export const Harness = {
 		try {
 			await harness.openTasks(context);
 		} catch (error) {
-			await harness.close(context);
+			// The caller's context may be what failed open: close without it, and rethrow the open error.
+			await harness
+				.close(withoutAbortSignal(context))
+				.catch((closeError: unknown) => options.onReport?.(closeError));
 			throw error;
 		}
 		return harness;

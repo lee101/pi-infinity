@@ -11,7 +11,7 @@ facades, membranes, document routing, view projection, events, or clone chains.
 
 - Obsolete `pico` and `pico4` prototypes were removed.
 - `pico3` remains.
-- Packages 1–20 are implemented in `packages/durable`; Package 10 was already satisfied by Chord's canonical structural diff implementation.
+- Packages 1–23 are implemented in `packages/durable`; Package 10 was already satisfied by Chord's canonical structural diff implementation.
 
 ## 1. Records, cursors, and memory tables
 
@@ -894,6 +894,12 @@ interrupted turn. Run all package tests and the repository check, finish with a
 local coding-agent turn and a reopened interrupted turn through the public
 Harness, then stop for final review.
 
+Done. The spec wording is settled as proposed (§2.2 close and progress calls,
+§5.1, §7.5, §9.1, §12). Close ends states and watches at the seal; a new Harness
+may open the Storage once the old `close()` resolved. The lifecycle tests are in
+`harness-lifecycle.test.ts`, the Chord guide runs as `chord-guide.test.ts`, and
+the spec's usage examples compile in `spec-usage.test.ts`.
+
 ## 23. Task graph view
 
 A live, observable view of the Session's task graph for UIs and debugging, like
@@ -902,3 +908,10 @@ A live, observable view of the Session's task graph for UIs and debugging, like
 background flag, and owned conversations, published after each commit as a
 replicated state or watch. `inspect()` already provides a one-off snapshot of
 the live task records. Specify and build it after the final conformance package.
+
+Specified in `pico-v5.md` §9.5: `Harness.taskGraph()` and `watchTaskGraph()` mount
+every live task keyed by ID with its committed status (phase, wait, held outcome
+status), owner edge, flags, and owned conversations. Derived states (`blocked`,
+`ready`, the live part of `on`) stay in `inspect()`. Implemented in
+`src/harness/task-graph.ts`, tested in `harness-task-graph.test.ts` and the
+lifecycle tests, shown in example 24.

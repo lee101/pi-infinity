@@ -20,6 +20,14 @@
 - `AgentDoc`, `configure()`, `DEFAULT_RETRY_POLICY`, and `DEFAULT_COMPACTION_POLICY` exports.
 - `HarnessOptions.conversationCreated(tx, conversation)` runs in every commit that creates or forks a conversation, after the built-in documents, so applications can create their own documents in every conversation.
 - `Tx.submissionByRequest()` and `Tx.createSubmission()`; the latter writes a raw submission record without admission rules.
+- `ConversationWatch` type alias for `Conversation.watch()`.
+- `Harness.taskGraph()` and `Harness.watchTaskGraph()`: every live task with its owner edge, committed status, background flag, abort mark, and owned conversations, as a Chord state or watch that advances with each commit.
+
+### Fixed
+
+- `TaskRuntime.now()` and `report()` throw after the invocation ended, like every other runtime operation.
+- A commit that only migrates a document to a newer version publishes it, so states and watches acquired with the older token receive the migrated value.
+- A failed `Harness.open()` closes the Session without the caller's context and rethrows the original error; a cancelled context no longer masks it or leaves Storage open.
 
 ## [0.99.2] - 2026-09-30
 

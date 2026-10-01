@@ -27,7 +27,7 @@
  */
 
 import { join, resolve } from "node:path";
-import type { SelectItem } from "@earendil-works/pi-tui";
+import { hyperlink, type SelectItem } from "@earendil-works/pi-tui";
 import type { TSchema } from "typebox";
 import { getAgentDir } from "../../config.ts";
 import type {
@@ -486,7 +486,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
 		const tokensAtSignIn = new Map<McpServerConnection, string>();
 		const storedTokens = (connection: McpServerConnection): string => {
 			const url = connection.oauthUrl;
-			return url && credentials ? JSON.stringify(credentials.tokens(url) ?? null) : "null";
+			return url && credentials ? JSON.stringify(credentials.tokens(connection.name, url) ?? null) : "null";
 		};
 		const onConnectionChange = (connection: McpServerConnection) => {
 			if (connection.state !== "needs-auth") tokensAtSignIn.delete(connection);
@@ -598,7 +598,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
 			try {
 				await runtime.signInMcpServer({
 					serverUrl: url,
-					store: getCredentials(runtime).forServer(url),
+					store: getCredentials(runtime).forServer(server.entry.name, url),
 					settings: connection.oauthSettings(),
 					challenge: connection.challenge,
 					prompt,
@@ -621,7 +621,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
 			const connection = server.connection;
 			const url = connection?.oauthUrl;
 			if (!connection || !url) return false;
-			const removed = getCredentials(await loadMcpRuntime()).remove(url);
+			const removed = getCredentials(await loadMcpRuntime()).remove(server.entry.name, url);
 			await connection.signOut();
 			return removed;
 		};
@@ -924,7 +924,12 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
 			}
 			const failure = await signIn(server, {
 				showAuthorizationUrl: (url) => {
-					ctx.ui.notify(`Sign in to MCP server "${name}" in your browser:\n${url.href}`, "info");
+					// Long URLs wrap, which some terminals cannot open; a short link line stays on one line.
+					const lines =
+						ctx.mode === "tui"
+							? `${hyperlink(url.href, url.href)}\n${hyperlink(process.platform === "darwin" ? "Cmd+click to open" : "Ctrl+click to open", url.href)}`
+							: url.href;
+					ctx.ui.notify(`Sign in to MCP server "${name}" in your browser:\n${lines}`, "info");
 					openUrl(url.href);
 				},
 				promptForRedirectUrl: (signal) =>

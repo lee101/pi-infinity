@@ -521,6 +521,8 @@ describe("task runtime", () => {
 		await expect(runtime.watchDoc(Notes, context)).rejects.toThrow("invocation has ended");
 		// The handler's own context is cancelled by now; the ended invocation still wins.
 		await expect(runtime.agent(handlerContext!)).rejects.toThrow("invocation has ended");
+		expect(() => runtime.now()).toThrow("invocation has ended");
+		expect(() => runtime.report(new Error("late"))).toThrow("invocation has ended");
 		await harness.close(context);
 	});
 

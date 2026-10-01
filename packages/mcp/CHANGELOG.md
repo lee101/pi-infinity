@@ -6,6 +6,7 @@
 
 - Added an `authorizationServerMetadataUrl` option to `authorizeMcp()` to use a configured authorization server metadata document instead of discovery ([#10172](https://github.com/earendil-works/pi/issues/10172)).
 - Added an `iss` option to `authorizeMcp()`. The authorization code is only exchanged when `iss` names the flow's authorization server, or is absent and the server's metadata does not set `authorization_response_iss_parameter_supported` (RFC 9207).
+- Added `stepUpScope()`, which combines the scopes of an `insufficient_scope` challenge with the scopes granted so far.
 
 ### Fixed
 
@@ -14,6 +15,7 @@
 - Fixed invalid URLs in protected resource metadata aborting OAuth discovery instead of falling back to the MCP server's origin.
 - Fixed an empty requested scope, from `scope=""` in a `WWW-Authenticate` challenge or an empty `scopes_supported`, overriding the next scope source.
 - Fixed list pagination failing with a duplicate cursor error when a server ends pagination with `nextCursor: ""` or `null`.
+- Fixed step-up authorization in `adaptOAuthProvider()` requesting only the scopes of the `insufficient_scope` challenge. The new token lost the scopes granted before, so other requests failed with `insufficient_scope` again. Tokens now record their granted scope, which is the requested scope when the token response omits `scope`.
 
 ## [0.99.2] - 2026-09-30
 

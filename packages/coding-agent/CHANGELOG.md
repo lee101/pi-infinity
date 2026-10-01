@@ -6,10 +6,18 @@
 
 - Added an `oauth.authServerMetadataUrl` setting for MCP servers that advertise a wrong OAuth authorization server or none. Pi uses the configured metadata document instead of discovery ([#10172](https://github.com/earendil-works/pi/issues/10172)).
 
+### Changed
+
+- MCP OAuth credentials are now stored per server name and URL, so MCP servers with the same URL can sign in with different accounts. Credentials stored by URL alone move to the first server that uses them ([#10252](https://github.com/earendil-works/pi/issues/10252)).
+
 ### Fixed
 
 - Fixed MCP OAuth sign-in accepting an authorization response whose `iss` parameter names another authorization server; the code is now rejected before it is exchanged (RFC 9207).
 - Fixed MCP OAuth sign-in failing with `Invalid scope` when the token response contains `"scope": ""`, and similar failures for other empty or `null` optional OAuth fields ([#10266](https://github.com/earendil-works/pi/issues/10266)).
+- Fixed the sign-in URL printed by `/mcp login` not being clickable when it wraps ([#10186](https://github.com/earendil-works/pi/issues/10186)).
+- Fixed `--provider` without `--model` being silently ignored and running the default model from another provider; it now fails with an error ([#10236](https://github.com/earendil-works/pi/issues/10236)).
+- Fixed MCP servers that ask for more scope (`insufficient_scope`) requesting sign-in over and over. The new sign-in requested only the missing scopes, so the new token lost access the previous one had; it now keeps the granted scopes.
+- Fixed user messages in the transcript keeping two full-width copies of every rendered line; they keep one, with identical output.
 
 ## [0.99.2] - 2026-09-30
 

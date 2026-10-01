@@ -583,6 +583,9 @@ interface Harness extends Session {
   waitForIdle(context: Context): Promise<void>;
   /** Session total of every conversation's `pi.usage` (section 8.6). */
   usage(context: Context): Promise<UsageState>;
+  /** Live tasks as a structural view (section 9.5). */
+  taskGraph(context: Context): Promise<AttachedReplicatedState<TaskGraph>>;
+  watchTaskGraph(context: Context): Promise<TaskGraphWatch>;
 }
 
 declare const Harness: {
@@ -627,10 +630,12 @@ model produces a durable `no_model` generation failure.
 repeat open-time reconciliation, and it throws after close. Work that must happen
 before any task runs, such as installing extensions or seeding, happens before
 `resume()`. Calls that ask for progress also enable scheduling, so they never
-wait on a paused Harness: `Conversation.submit()`, `Conversation.compact()`, `Submission.wait()`,
-`Harness.waitForTask()`, `Harness.waitForIdle()`, and
-`Conversation.waitForIdle()`. Recovered work starts with them. A viewer that only
-reads never enables scheduling.
+wait on a paused Harness: `Conversation.submit()`, `Conversation.compact()`,
+`Conversation.abort()`, `Submission.wait()`, `Harness.waitForTask()`,
+`Harness.waitForIdle()`, and `Conversation.waitForIdle()`. Recovered work starts
+with them. A viewer that only reads never enables scheduling: `inspect()`,
+`getTask()`, `submission()`, `Submission.status()`, `usage()`, document reads,
+every conversation read, state, and watch, and the task graph.
 
 `createConversation({ ownership, agent, init })` and
 `fork(at, { ownership, agent, init })` commit atomically: the conversation, its
@@ -846,8 +851,8 @@ deadline-blocked, and `completing` work is still live and therefore not idle. Ca
 wait aborts only that waiter.
 
 Conversation handles are stateless; compare them by `id`. Hosts discover
-conversations through lookups and scans. There is no creation listener and no
-activity view; `inspect()` and the idle waits report live work.
+conversations through lookups and scans. There is no creation listener; the task
+graph view (section 9.5), `inspect()`, and the idle waits report live work.
 
 `submit()` returns after durable admission, not settlement. An input submission
 creates a user message with the Harness clock's timestamp at placement, which is
@@ -891,12 +896,25 @@ uses the same serialized asynchronous, bounded-buffer contract as `watchDoc()`
 in section 9.2. Neither carries semantic events or owns a second persistence
 authority.
 
-`close()` seals mutation admission and
-task reservation, signals invocations, and stops future watch deliveries. Outside
-the Session line it lets already-admitted storage commits settle, joins
-task/tool/hook invocations, then closes states and storage. Already-running watch
-callbacks remain caller-owned and may finish independently. Close writes no task
-outcome. Handles belong to that open Harness and must be reacquired after reopen.
+`close()` seals mutation admission and task reservation, signals invocations,
+and ends every document state, view state, and watch at that seal: a commit
+that settles during close publishes nothing to them, and a state keeps its last
+value. Outside the Session line it lets already-admitted storage commits settle,
+joins task, tool, and hook invocations, including code that ignores its signal,
+then closes Storage. Once `close()` resolves, no invocation code of this Harness
+runs and no handler holds Storage, so a new Harness may open the same Storage.
+Already-running watch callbacks remain caller-owned and may finish
+independently. Close writes no task outcome. Cancelling a `close()` call cancels
+only that wait; shutdown continues, and every later `close()` awaits the same
+shutdown.
+
+Handles belong to that open Harness and must be reacquired after reopen. Once
+close begins, every new Harness, conversation, and submission operation rejects,
+and `resume()` throws. Of the operations already queued on the Session line at
+the seal, commits settle (section 4) and reads complete. Waits, states, and
+watches reject, except two that need no later commit: `Submission.wait()` of an
+already settled submission resolves, and an acquisition of an absent document
+resolves `undefined`. An `inspect()` among them reports `scheduling: "closing"`.
 
 ## 3. Documents
 
@@ -1353,11 +1371,11 @@ reject after the callback settles. The prepared immutable value remains readable
 by Session-owned checkpoint and Storage preparation.
 
 ```ts
-let escaped: Draft<LiveState>;
+let escaped: Draft<LiveState> | undefined;
 await session.commit(async tx => {
   escaped = await tx.doc(LiveDoc, conversationId);
-});
-escaped.message = message; // throws: the draft was revoked
+}, context);
+escaped!.generation = undefined; // throws: the draft was revoked
 ```
 
 Fire-and-forget work that mutates a draft before the owner callback settles may
@@ -1411,8 +1429,8 @@ A high-churn live document can checkpoint when it becomes empty:
 
 ```ts
 checkpointWhen: (value, _ops) =>
-  value.message === undefined &&
-  value.tools.length === 0
+  value.generation === undefined &&
+  value.tools === undefined
 ```
 
 ### 3.6 Versions and migrations
@@ -1520,8 +1538,8 @@ await session.commit(async tx => {
   const live = await tx.doc(LiveDoc, conversationId);
 
   await tx.appendEntry(conversationId, message);     // first table write
-  delete live.message;                               // document mutation remains valid
-  await tx.createTask(Follow, {}, { ownership: { kind: "conversation" } }); // further table writes are fine
+  delete live.generation;                            // document mutation remains valid
+  await tx.createTask(Follow, {}, { ownership: { kind: "conversation" }, conversationId }); // further table writes are fine
 }, context);
 ```
 
@@ -1793,14 +1811,16 @@ supported older version. A task whose definition is missing, older than the
 stored version, or fails migration stays `pending` or `waiting` and blocked until a fitting
 definition is installed or the task is aborted (section 5.4).
 `close()` marks the runtime closing, seals admission and reservation, signals
-invocations, and stops watches. Outside the Session line it settles admitted
+invocations, and ends states and watches. Outside the Session line it settles admitted
 commits and joins invocations before closing storage. Already-running watch callbacks remain
 caller-owned. Later runtime commits reject, and close writes no task outcome. Closing
 starts no fresh phase or abort invocation. It does not set abort marks,
 terminalize tasks, retire task documents, or publish document retirement. The
 hosting layer withdraws services and
-detaches clients; reconnecting to a reopened Session hydrates the last committed
-state and resumes recovery from its durable checkpoints.
+detaches clients before it closes the Harness, for example by disposing its Chord
+facet host (see the Chord usage guide); reconnecting to a reopened Session
+hydrates the last committed state and resumes recovery from its durable
+checkpoints.
 
 ### 5.2 Effect sandwich
 
@@ -3141,7 +3161,9 @@ If old extension code ignores cancellation and never settles, new work already
 uses the replacement. Harness close still joins every invocation. Safe forced termination of arbitrary
 non-cooperative JavaScript requires worker/process isolation; that host
 terminates the process and reopens the Session from durable state. Old and new
-Harness instances must never own the same Session concurrently.
+Harness instances must never own the same Session concurrently: open the new one
+after the old one's `close()` resolved, when none of its invocation code runs
+any more (section 2.2).
 
 ## 8. Built-in tasks
 
@@ -3806,6 +3828,9 @@ JSON `null` root replacement and ends that incarnation's stream. If the state
 remains exposed, consumers see `null`, never stale state. A later recreation
 requires acquiring a new state or watch.
 
+Session close ends every state at its seal: the state keeps its last value and
+receives no frame from a commit that settles during close.
+
 Each document state assigns its own in-memory contiguous Chord delivery sequence.
 Pico does not persist or expose that sequence through `WatchHandle`. States and watches retain immutable revisions independently of the loaded tracker
 cache. Reopen creates a new state lifetime and hydration.
@@ -4071,6 +4096,94 @@ Transport backpressure and disconnect policy belong to the consumer.
 
 Print mode awaits its own input `Submission` and prints its answer. A TUI
 renders `ConversationView`; events may drive transient animation.
+
+### 9.5 Task graph view
+
+The task graph view shows every live task of the Session as one structural
+value, for UIs and debugging: what runs, what waits for what, and which
+conversations each task owns. It is to the Session's tasks what the
+conversation view (section 9.3) is to one conversation.
+
+```ts
+type TaskGraphState =
+  | { readonly status: "pending" | "running"; readonly phase: string }
+  | {
+      readonly status: "waiting";
+      readonly phase: string;
+      readonly on: readonly TaskId[];
+      readonly policy: JoinPolicy;
+    }
+  /** Outcome held until its ordinary owned work drains (section 5.5). */
+  | { readonly status: "completing"; readonly outcome: TaskOutcome<JsonValue>["status"] };
+
+type TaskGraphNode = {
+  readonly id: TaskId;
+  readonly kind: string;
+  readonly conversationId: ConversationId;
+  /** Owner task; absent for a conversation-owned task. */
+  readonly owner?: TaskId;
+  readonly background: boolean;
+  readonly abortRequested: boolean;
+  readonly state: TaskGraphState;
+  /** Conversations this task owns, in ID order. */
+  readonly conversations: readonly ConversationId[];
+};
+
+type TaskGraph = {
+  /** Every live task, keyed by its decimal ID. */
+  readonly tasks: Readonly<Record<string, TaskGraphNode>>;
+};
+
+type TaskGraphWatch = WatchHandle<TaskGraph>;
+
+interface Harness {
+  taskGraph(context: Context): Promise<AttachedReplicatedState<TaskGraph>>;
+  watchTaskGraph(context: Context): Promise<TaskGraphWatch>;
+}
+```
+
+A node holds the committed task record without its input, checkpoint payload,
+outcome payload, and memos: `phase` is the checkpoint's phase, `on` and
+`policy` are the stored wait, and `outcome` is the held outcome's status.
+`running` is the durable status: open changes surviving `running` tasks to
+`pending` (section 5.4), so they show as `pending` until the scheduler reserves
+them again, while `waiting` and `completing` tasks keep their status. Whether a
+pending task is blocked, and which of the tasks in `on` are still live, depend
+on the registry and the rest of the graph; `inspect()` derives them. A node is
+present from the commit that creates its task until the commit that makes the
+task terminal. Owner edges are immutable, so a node's `conversations` only grow
+while it lives.
+
+The graph holds live tasks only. A conversation whose owner task is terminal,
+such as a background subagent's conversation after its anchor finished, has no
+node that lists it; a later task there is a top-level node of that conversation.
+A UI that places it under its parent reads the conversation's owner edge from
+`ConversationRecord.owner`, which `ConversationView.conversation` also carries.
+
+The Harness keeps at most one graph mount. The first `taskGraph()` or
+`watchTaskGraph()` builds its revision on the Session line from the committed
+live tasks and the conversations they own, one owner scan per live task, and
+holds the line while it does; the mount is dropped when its last observer
+detaches. It advances from `subscribeCommits()` publications like the
+conversation view: one publication that changes a node yields one Chord batch
+that sets or deletes `tasks[id]`, or sets a node's `conversations`. A
+publication that changes no node creates no revision. Task and conversation
+records are immutable values; a node shares nothing with them.
+
+`taskGraph()` returns the mount as a disposable read-only Chord state.
+`watchTaskGraph()` returns it through the serialized exact-frame watch of
+section 9.2. Both read only: neither enables scheduling. Close ends them at its
+seal like every other state and watch (section 2.2).
+
+```ts
+const graph = await harness.taskGraph(context);
+graph.subscribe((value) => {
+  for (const node of Object.values(value.tasks)) {
+    const where = node.owner === undefined ? `conversation ${node.conversationId}` : `task ${node.owner}`;
+    render(`${node.id} ${node.kind} ${node.state.status} under ${where}`);
+  }
+});
+```
 
 ## 10. Storage contract
 
@@ -4459,6 +4572,12 @@ These are contracts, not invitations to add defensive machinery:
 - **Unstable prompt text:** a section renderer whose output changes without a
   real content change, for example by embedding the time, appends system deltas
   and defeats provider prompt caching.
+- **Non-cooperative code at close:** close joins every invocation. A task
+  handler, tool, or hook that ignores its signal keeps `close()` pending and
+  Storage open until it returns; cancelling the close wait does not end it.
+- **Services outliving the Harness:** withdraw Chord services and detach clients
+  before closing the Harness. A state ended by close keeps its last value and
+  never updates again.
 - **Fatal storage errors:** after an uncertain storage failure the Session is
   poisoned. Do not catch the error and continue using it.
 - **JSONL durability:** default JSONL ordering handles ordinary process crashes;

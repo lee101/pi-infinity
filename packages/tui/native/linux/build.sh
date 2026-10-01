@@ -33,6 +33,7 @@ trap 'rm -rf "$build_dir"' EXIT
 common_flags=(
     -std=c11
     -D_POSIX_C_SOURCE=200809L
+    -D_GNU_SOURCE  # napi.h resolves RTLD_DEFAULT via dlsym (glibc GNU extension)
     -Wall
     -Wextra
     -Werror

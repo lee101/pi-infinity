@@ -636,6 +636,46 @@ describe("definition handover", () => {
 		await harness.close(context);
 	});
 
+	it("keeps the memos across a handover", async () => {
+		type Memoed = { phase: "a" } | { phase: "b" };
+		const log: string[] = [];
+		const gate = deferred();
+		const reached = deferred();
+		const memoTask = (label: string) =>
+			defineTask<null, Memoed, string>({
+				name: "test.handover-memo",
+				version: 1,
+				initial: () => ({ phase: "a" }),
+				phases: {
+					a: async (_task, runtime, ctx) => {
+						await runtime.memo("picked", label, ctx);
+						reached.resolve();
+						await gate.promise;
+						await runtime.commit(() => ({ status: "running", checkpoint: { phase: "b" } }), ctx);
+					},
+					b: async (_task, runtime, ctx) => {
+						// The candidate loses to the memo the old definition stored.
+						const picked = await runtime.memo("picked", label, ctx);
+						log.push(`${label}:b ${picked}`);
+						await runtime.commit(() => completed(picked), ctx);
+					},
+				},
+				abort: async () => {},
+			});
+		const registry = createRegistry();
+		addTask(registry, memoTask("old"));
+		const { harness } = await openTasks(new MemoryStorage(), [], { registry });
+		const id = await createIn(harness, memoTask("old"));
+		harness.resume();
+		await reached.promise;
+		addTask(registry, memoTask("new"));
+		gate.resolve();
+		const receipt = await harness.waitForTask(id, context);
+		expect(receipt.state.outcome).toEqual({ status: "completed", result: "old" });
+		expect(log).toEqual(["new:b old"]);
+		await harness.close(context);
+	});
+
 	it("hands over to a newer version with a migration", async () => {
 		const log: string[] = [];
 		const gate = deferred();

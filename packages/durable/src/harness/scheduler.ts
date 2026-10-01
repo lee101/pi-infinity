@@ -1169,8 +1169,14 @@ export class TaskScheduler {
 			}) as ErasedRuntime["entry"],
 			context: (conversationId, context, at) =>
 				this.#read(invocation, () => readContext(this.#session, this.#storage, conversationId, context, at)),
-			now: () => this.#now(),
-			report: (error) => this.#report(error),
+			now: () => {
+				if (invocation.ended) throw endedError(invocation);
+				return this.#now();
+			},
+			report: (error) => {
+				if (invocation.ended) throw endedError(invocation);
+				this.#report(error);
+			},
 		};
 	}
 
