@@ -30,6 +30,13 @@ export type {
 	OAuthSelectOption,
 	OAuthSelectPrompt,
 } from "./compat/extension-oauth-types.ts";
+// Legacy global API surface (static catalog helpers `getModel`/`getModels`/
+// `getProviders`, the api-registry dispatch `stream`/`complete`/
+// `streamSimple`, provider registration). Upstream moved these behind the
+// `@earendil-works/pi-ai/compat` subpath; the root re-export keeps consumers
+// written against the pre-0.76 root layout working. New code should use
+// `Models`/`builtinModels()` from `./models.ts` and the `providers/*` subpaths.
+export * from "./compat.ts";
 export * from "./models.ts";
 export * from "./models-store.ts";
 export * from "./providers/faux.ts";

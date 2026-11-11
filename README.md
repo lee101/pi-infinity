@@ -27,6 +27,7 @@ Two flags turn Pi into a fully autonomous coding agent:
 | **[@earendil-works/pi-agent-core](packages/agent)** | Agent runtime with tool calling and state management |
 | **[@earendil-works/pi-coding-agent](packages/coding-agent)** | Interactive coding agent CLI |
 | **[@earendil-works/pi-tui](packages/tui)** | Terminal UI library with differential rendering |
+| **[@earendil-works/pi-web-ui](packages/web-ui)** | Web components for AI chat interfaces (restored by this fork; upstream removed the workspace in b141e1fa2) |
 
 
 ```shell

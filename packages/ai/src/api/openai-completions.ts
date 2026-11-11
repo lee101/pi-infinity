@@ -491,12 +491,18 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 				}
 				return thinkingBlock;
 			};
+			// Some gateways (OpenPaths free route) stream tool calls without `index` and send argument
+			// continuations with an empty id and name. Such a delta belongs to the last tool call.
+			let lastToolCallBlock: StreamingToolCallBlock | undefined;
 			const ensureToolCallBlock = (toolCall: StreamingToolCallDelta) => {
 				const streamIndex = typeof toolCall.index === "number" ? toolCall.index : undefined;
 				const name = toolCall.function?.name ?? toolCall.custom?.name ?? "";
 				let block = streamIndex !== undefined ? toolCallBlocksByIndex.get(streamIndex) : undefined;
 				if (!block && toolCall.id) {
 					block = toolCallBlocksById.get(toolCall.id);
+				}
+				if (!block && streamIndex === undefined && !toolCall.id && !name) {
+					block = lastToolCallBlock;
 				}
 				if (!block) {
 					// Note: the "input" fallback here should/must not be taken.  in case the LLM makes up
@@ -528,6 +534,7 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 						partial: output,
 					});
 				}
+				lastToolCallBlock = block;
 				if (streamIndex !== undefined && block.streamIndex === undefined) {
 					block.streamIndex = streamIndex;
 					toolCallBlocksByIndex.set(streamIndex, block);

@@ -38,11 +38,13 @@ import { openAICodexResponsesApi } from "./api/openai-codex-responses.lazy.ts";
 import { openAICompletionsApi } from "./api/openai-completions.lazy.ts";
 import { openAIResponsesApi } from "./api/openai-responses.lazy.ts";
 import { piMessagesApi } from "./api/pi-messages.lazy.ts";
+import { getGeneratedModels, getRegisteredModels, registerModels, resetProviderModels } from "./catalog-registry.ts";
 import { getEnvApiKey } from "./env-api-keys.ts";
-import type { ModelsApiStreamOptions } from "./models.ts";
-import { builtinModels, getBuiltinModel, getBuiltinModels, getBuiltinProviders } from "./providers/all.ts";
+import type { ModelsApiStreamOptions, Provider } from "./models.ts";
+import { builtinModels, builtinProviders } from "./providers/all.ts";
 
 export type { BuiltinProvider } from "./providers/all.ts";
+export { getGeneratedModels, registerModels, resetProviderModels };
 
 import { createFauxCore, type FauxProviderRegistration, type RegisterFauxProviderOptions } from "./providers/faux.ts";
 import type {
@@ -61,14 +63,29 @@ import type {
 } from "./types.ts";
 import { normalizeContext } from "./utils/transcript.ts";
 
-/** @deprecated Static catalog read. Use `getBuiltinModel` from "@earendil-works/pi-ai/providers/all" or `Models.getModel()`. */
-export const getModel = getBuiltinModel;
+let builtinProviderCache: Map<string, Provider> | undefined;
 
-/** @deprecated Static catalog read. Use `getBuiltinModels` from "@earendil-works/pi-ai/providers/all" or `Models.getModels()`. */
-export const getModels = getBuiltinModels;
+/** Built-in provider instances (including hand-written ones like openpaths), keyed by id. */
+function builtinProviderById(): Map<string, Provider> {
+	builtinProviderCache ??= new Map(builtinProviders().map((provider) => [provider.id, provider]));
+	return builtinProviderCache;
+}
 
-/** @deprecated Static catalog read. Use `getBuiltinProviders` from "@earendil-works/pi-ai/providers/all" or `Models.getProviders()`. */
-export const getProviders = getBuiltinProviders;
+/** @deprecated Runtime catalog read. Use `Models.getProviders()` or `builtinProviders()` from "@earendil-works/pi-ai/providers/all". */
+export function getProviders(): string[] {
+	return [...builtinProviderById().keys()];
+}
+
+/** @deprecated Runtime catalog read. Use `Models.getModels()` from "@earendil-works/pi-ai". */
+export function getModels(provider?: string): readonly Model<Api>[] {
+	if (provider === undefined) return getProviders().flatMap((id) => getModels(id));
+	return getRegisteredModels(provider) ?? builtinProviderById().get(provider)?.getModels() ?? [];
+}
+
+/** @deprecated Runtime catalog read. Use `Models.getModel()` from "@earendil-works/pi-ai". */
+export function getModel(provider: string, id: string): Model<Api> {
+	return getModels(provider).find((model) => model.id === id) as Model<Api>;
+}
 
 export type ApiStreamFunction = (
 	model: Model<Api>,
