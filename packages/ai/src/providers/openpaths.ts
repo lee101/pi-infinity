@@ -238,6 +238,16 @@ const OPENPATHS_MODELS = [
 		contextWindow: 500000,
 		maxTokens: 16384,
 	},
+	{
+		...OPENPATHS_MODEL_BASE,
+		id: "or/ember-1",
+		name: "Ember 1",
+		reasoning: false,
+		input: ["text", "image"],
+		cost: { input: 3.165, output: 15.825, cacheRead: 0.3165, cacheWrite: 0 },
+		contextWindow: 1048576,
+		maxTokens: 943718,
+	},
 ] satisfies Model<"openai-completions">[];
 
 /** OpenPaths gateway (https://openpaths.io/v1), including the free stealth

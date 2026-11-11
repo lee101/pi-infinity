@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added the OpenPaths provider (`openpaths`) for the OpenAI-compatible OpenPaths gateway (`https://openpaths.io/v1`), including the free stealth route `openpaths/free`. The API key is picked up from the `OPENPATHS_API_KEY` environment variable.
+- Added the OpenPaths provider (`openpaths`) for the OpenAI-compatible OpenPaths gateway (`https://openpaths.io/v1`), including the free stealth route `openpaths/free` and `or/ember-1`. The API key is picked up from the `OPENPATHS_API_KEY` environment variable.
 
 ## [1.5.2] - 2026-11-10
 
