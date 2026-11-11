@@ -312,6 +312,23 @@ function buildFallbackModel(providerModels: [Model<Api>, ...Model<Api>[]], model
 	};
 }
 
+/** Gateways whose model ids change faster than any catalog: users may type any id. */
+export const CUSTOM_MODEL_ID_PROVIDERS: readonly string[] = ["openpaths", "openrouter"];
+
+/** Build a model for an id missing from the catalog of a custom-id provider, or undefined. */
+export function buildCustomProviderModel(
+	modelRuntime: ModelRuntime,
+	provider: string,
+	modelId: string,
+): Model<Api> | undefined {
+	if (!CUSTOM_MODEL_ID_PROVIDERS.includes(provider) || !modelId.trim()) return undefined;
+	const existing = modelRuntime.getModel(provider, modelId);
+	if (existing) return existing;
+	const providerModels = modelRuntime.getModels(provider);
+	if (providerModels.length === 0) return undefined;
+	return buildFallbackModel(providerModels as [Model<Api>, ...Model<Api>[]], modelId.trim());
+}
+
 export interface ModelScopeDiagnostic {
 	type: "warning";
 	code: "no-match" | "invalid-thinking-level" | "ambiguous";
@@ -581,7 +598,9 @@ export async function findInitialModel(options: {
 
 	// 2. Try saved default from settings if auth is configured.
 	if (defaultProvider && defaultModelId) {
-		const found = modelRuntime.getModel(defaultProvider, defaultModelId);
+		const found =
+			modelRuntime.getModel(defaultProvider, defaultModelId) ??
+			buildCustomProviderModel(modelRuntime, defaultProvider, defaultModelId);
 		if (found && modelRuntime.hasConfiguredAuth(found.provider)) {
 			model = found;
 			const perModel = modelThinkingLevels?.[`${defaultProvider}/${defaultModelId}`];
@@ -625,7 +644,9 @@ export async function restoreModelFromSession(
 	shouldPrintMessages: boolean,
 	modelRuntime: ModelRuntime,
 ): Promise<{ model: Model<Api> | undefined; fallbackMessage: string | undefined }> {
-	const restoredModel = modelRuntime.getModel(savedProvider, savedModelId);
+	const restoredModel =
+		modelRuntime.getModel(savedProvider, savedModelId) ??
+		buildCustomProviderModel(modelRuntime, savedProvider, savedModelId);
 
 	// Check if restored model exists and still has auth configured
 	const hasConfiguredAuth = restoredModel ? modelRuntime.hasConfiguredAuth(restoredModel.provider) : false;

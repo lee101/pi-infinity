@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added typing any model id for OpenPaths and OpenRouter in `/model`: text that is not in the catalog is offered as a `custom id` entry, the current custom id stays listed, and a saved default or session model with an unlisted id is restored instead of falling back.
+
 ### Fixed
 
 - Fixed pi exiting with an uncaught `AbortError` when a `read` tool call is cancelled while the file is being opened ([#11956](https://github.com/earendil-works/pi/issues/11956))

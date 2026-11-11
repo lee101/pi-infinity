@@ -10,6 +10,7 @@ import {
 	Text,
 	type TUI,
 } from "@earendil-works/pi-tui";
+import { buildCustomProviderModel, CUSTOM_MODEL_ID_PROVIDERS } from "../../../core/model-resolver.ts";
 import type { ModelRuntime } from "../../../core/model-runtime.ts";
 import { refreshModelCatalogs } from "../model-catalog-refresh.ts";
 import { getDistinctModelName, getModelSelectorSearchText } from "../model-search.ts";
@@ -21,6 +22,7 @@ interface ModelItem {
 	provider: string;
 	id: string;
 	model: Model<any>;
+	custom?: boolean;
 }
 
 interface ScopedModelItem {
@@ -163,11 +165,16 @@ export class ModelSelectorComponent extends Container implements Focusable {
 	}
 
 	private loadModelsFromSnapshot(): void {
-		const models = this.modelRuntime.getAvailableSnapshot().map((model: Model<any>) => ({
+		const models: ModelItem[] = this.modelRuntime.getAvailableSnapshot().map((model: Model<any>) => ({
 			provider: model.provider,
 			id: model.id,
 			model,
 		}));
+		// A custom id in use stays listed, so it can be picked again without retyping.
+		const current = this.currentModel;
+		if (current && !models.some((item) => modelsAreEqual(current, item.model))) {
+			models.push({ provider: current.provider, id: current.id, model: current, custom: true });
+		}
 		this.allModels = this.sortModels(models);
 		this.scopedModels = this.scopedModels.map((scoped) => {
 			const refreshed = this.modelRuntime.getModel(scoped.model.provider, scoped.model.id);
@@ -301,6 +308,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		} else {
 			this.filteredModels = this.activeModels;
 		}
+		this.filteredModels = [...this.filteredModels, ...this.buildCustomItems(query)];
 		// Keep the preferred model selected if it is still listed. Otherwise, when filtering
 		// by a query, move the selector to the top row so the best match is highlighted.
 		// When the query is cleared, keep the current position clamped to the (restored) list length.
@@ -310,6 +318,25 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		if (preferredIndex >= 0) this.selectedIndex = preferredIndex;
 		else this.selectedIndex = query ? 0 : Math.min(this.selectedIndex, Math.max(0, this.filteredModels.length - 1));
 		this.updateList();
+	}
+
+	/** Offer the typed text as a model id for gateways whose catalogs lag behind (OpenPaths, OpenRouter). */
+	private buildCustomItems(query: string): ModelItem[] {
+		const text = query.trim();
+		if (text.length < 3 || /\s/.test(text)) return [];
+		const items: ModelItem[] = [];
+		for (const provider of CUSTOM_MODEL_ID_PROVIDERS) {
+			if (!this.modelRuntime.hasConfiguredAuth(provider)) continue;
+			const prefix = `${provider}/`;
+			const ids = new Set<string>([text]);
+			if (text.startsWith(prefix) && text.length > prefix.length) ids.add(text.slice(prefix.length));
+			for (const id of ids) {
+				if (this.allModels.some((item) => item.provider === provider && item.id === id)) continue;
+				const model = buildCustomProviderModel(this.modelRuntime, provider, id);
+				if (model) items.push({ provider, id, model, custom: true });
+			}
+		}
+		return items;
 	}
 
 	private updateList(): void {
@@ -337,7 +364,8 @@ export class ModelSelectorComponent extends Container implements Focusable {
 			const name = getDistinctModelName({ id: item.id, name: item.model.name });
 			const nameText = name ? theme.fg("muted", ` (${name})`) : "";
 			const providerBadge = theme.fg("muted", `[${item.provider}]`);
-			const line = `${cursor}${currentMarker}${modelText}${nameText} ${providerBadge}${defaultBadge}`;
+			const customBadge = item.custom ? theme.fg("warning", " · custom id") : "";
+			const line = `${cursor}${currentMarker}${modelText}${nameText} ${providerBadge}${defaultBadge}${customBadge}`;
 
 			this.listContainer.addChild(new Text(line, 0, 0));
 		}
