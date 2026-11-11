@@ -66,7 +66,14 @@ export async function shareSession(context: SessionShareContext): Promise<void> 
 			context.showError(`Failed to export session: ${error instanceof Error ? error.message : "Unknown error"}`);
 			return;
 		}
-		if (await tryShareViaRadius(jsonlFile, context)) return;
+		const destination = context.session.settingsManager.getSessionShareDestination();
+		if (destination !== "gist") {
+			if (await tryShareViaRadius(jsonlFile, context)) return;
+			if (destination === "radius") {
+				context.showError("Radius authentication is not configured. Run '/login radius' first.");
+				return;
+			}
+		}
 
 		try {
 			const authResult = spawnSync("gh", ["auth", "status"], { encoding: "utf-8" });
@@ -181,6 +188,8 @@ async function shareViaGist(tmpFile: string, context: SessionShareContext): Prom
 			proc.stderr?.on("data", (data) => {
 				stderr += data.toString();
 			});
+			// A failed spawn emits 'error' and may never emit 'close'; without a listener it crashes pi.
+			proc.on("error", (error) => resolve({ stdout, stderr: stderr || error.message, code: null }));
 			proc.on("close", (code) => resolve({ stdout, stderr, code }));
 		});
 

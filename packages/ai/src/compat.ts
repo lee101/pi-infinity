@@ -40,8 +40,15 @@ import { openAIResponsesApi } from "./api/openai-responses.lazy.ts";
 import { piMessagesApi } from "./api/pi-messages.lazy.ts";
 import { getGeneratedModels, getRegisteredModels, registerModels, resetProviderModels } from "./catalog-registry.ts";
 import { getEnvApiKey } from "./env-api-keys.ts";
+import type { MODELS } from "./models.generated.ts";
 import type { ModelsApiStreamOptions, Provider } from "./models.ts";
-import { builtinModels, builtinProviders } from "./providers/all.ts";
+import {
+	type BuiltinProvider,
+	builtinModels,
+	builtinProviders,
+	type getBuiltinModel,
+	type getBuiltinModels,
+} from "./providers/all.ts";
 
 export type { BuiltinProvider } from "./providers/all.ts";
 export { getGeneratedModels, registerModels, resetProviderModels };
@@ -72,17 +79,26 @@ function builtinProviderById(): Map<string, Provider> {
 }
 
 /** @deprecated Runtime catalog read. Use `Models.getProviders()` or `builtinProviders()` from "@earendil-works/pi-ai/providers/all". */
-export function getProviders(): string[] {
-	return [...builtinProviderById().keys()];
+export function getProviders(): BuiltinProvider[] {
+	return [...builtinProviderById().keys()] as BuiltinProvider[];
 }
 
 /** @deprecated Runtime catalog read. Use `Models.getModels()` from "@earendil-works/pi-ai". */
+export function getModels<TProvider extends BuiltinProvider>(
+	provider: TProvider,
+): ReturnType<typeof getBuiltinModels<TProvider>>;
+export function getModels(provider?: string): readonly Model<Api>[];
 export function getModels(provider?: string): readonly Model<Api>[] {
 	if (provider === undefined) return getProviders().flatMap((id) => getModels(id));
 	return getRegisteredModels(provider) ?? builtinProviderById().get(provider)?.getModels() ?? [];
 }
 
 /** @deprecated Runtime catalog read. Use `Models.getModel()` from "@earendil-works/pi-ai". */
+export function getModel<TProvider extends BuiltinProvider, TModelId extends keyof (typeof MODELS)[TProvider]>(
+	provider: TProvider,
+	id: TModelId,
+): ReturnType<typeof getBuiltinModel<TProvider, TModelId>>;
+export function getModel(provider: string, id: string): Model<Api>;
 export function getModel(provider: string, id: string): Model<Api> {
 	return getModels(provider).find((model) => model.id === id) as Model<Api>;
 }

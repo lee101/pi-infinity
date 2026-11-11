@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 dist/
 .artifacts/
 *.log
@@ -37,10 +37,13 @@ out.jsonl
 pi-*.html
 out.html
 packages/coding-agent/binaries/
+packages/env/bin/
+packages/env/daemon/target/
 todo.md
 .pinf
 plans/
 .pi/hf-sessions/
 .pi/hf-sessions-backup/
+.pi/settings.json
 collect.sh
 packages/agent/docs/extensions/pi-server-artifact/index.md

@@ -11,14 +11,14 @@ export class OAuthError extends Error {
 }
 
 export class OAuthIssuerMismatchError extends Error {
-	readonly expected: string;
+	/** `undefined` when no authorization server metadata was discovered. */
+	readonly expected: string | undefined;
 	/** `undefined` when an authorization response lacks the `iss` parameter its server promised (RFC 9207). */
 	readonly received: string | undefined;
 
-	constructor(expected: string, received: string | undefined) {
-		super(
-			`OAuth issuer mismatch: expected ${JSON.stringify(expected)}, received ${received === undefined ? "none" : JSON.stringify(received)}`,
-		);
+	constructor(expected: string | undefined, received: string | undefined) {
+		const format = (issuer: string | undefined) => (issuer === undefined ? "none" : JSON.stringify(issuer));
+		super(`OAuth issuer mismatch: expected ${format(expected)}, received ${format(received)}`);
 		this.name = "OAuthIssuerMismatchError";
 		this.expected = expected;
 		this.received = received;
@@ -51,5 +51,16 @@ export class McpOAuthAuthorizationRequiredError extends Error {
 	constructor() {
 		super("MCP OAuth authorization requires user interaction");
 		this.name = "McpOAuthAuthorizationRequiredError";
+	}
+}
+
+/**
+ * Thrown by `McpOAuthServerStore.withRefreshLock()` when another process holds the refresh lock for the
+ * whole wait. `startMcpSignIn()` then skips the refresh and goes to the browser step.
+ */
+export class McpRefreshLockBusyError extends Error {
+	constructor() {
+		super("Another process is refreshing the MCP server's tokens");
+		this.name = "McpRefreshLockBusyError";
 	}
 }

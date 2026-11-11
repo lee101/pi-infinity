@@ -1,10 +1,10 @@
 {
 	"name": "@codex-infinity/pi-infinity-install",
-	"version": "0.99.2",
+	"version": "1.5.2",
 	"private": true,
 	"description": "Lockfile root used by the Pi installer and updater.",
 	"dependencies": {
-		"@codex-infinity/pi-infinity": "0.99.2"
+		"@codex-infinity/pi-infinity": "1.5.2"
 	},
 	"overrides": {
 		"protobufjs": "7.6.6"

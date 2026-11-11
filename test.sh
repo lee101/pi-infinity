@@ -69,6 +69,14 @@ for name in SystemRoot SYSTEMROOT WINDIR COMSPEC PATHEXT; do
 	[[ -z "$value" ]] || test_env+=("$name=$value")
 done
 
+# Trust extra certificates of proxies that inspect HTTPS (corporate proxies, sandboxes).
+# Network tests fail with self-signed certificate errors without it.
+value="${NODE_EXTRA_CA_CERTS-}"
+[[ -z "$value" ]] || test_env+=("NODE_EXTRA_CA_CERTS=$value")
+
+# The pi-env tests build their daemon with cargo, whose toolchains live under the real home.
+test_env+=("RUSTUP_HOME=${RUSTUP_HOME:-$HOME/.rustup}" "CARGO_HOME=${CARGO_HOME:-$HOME/.cargo}")
+
 # Preserve CI detection only for runner behavior and test reporting.
 for name in CI GITHUB_ACTIONS; do
 	value="${!name-}"
