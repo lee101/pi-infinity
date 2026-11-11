@@ -20,7 +20,7 @@
 		"@lmstudio/sdk": "1.5.0",
 		"@earendil-works/pi-ai": "1.5.2",
 		"@earendil-works/pi-tui": "1.5.2",
-		"typebox": "1.1.38",
+		"@earendil-works/pi-schema": "1.5.2",
 		"docx-preview": "0.3.7",
 		"highlight.js": "11.12.0",
 		"jszip": "3.10.2",

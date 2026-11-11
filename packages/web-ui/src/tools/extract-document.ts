@@ -1,9 +1,9 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
+import { obj, type Static, str } from "@earendil-works/pi-schema";
 import { html } from "lit";
 import { createRef, ref } from "lit/directives/ref.js";
 import { FileText } from "lucide";
-import { type Static, Type } from "typebox";
 import { EXTRACT_DOCUMENT_DESCRIPTION } from "../prompts/prompts.ts";
 import { loadAttachment } from "../utils/attachment-utils.ts";
 import { isCorsError } from "../utils/proxy-utils.ts";
@@ -14,8 +14,8 @@ import type { ToolRenderer, ToolRenderResult } from "./types.ts";
 // TYPES
 // ============================================================================
 
-const extractDocumentSchema = Type.Object({
-	url: Type.String({
+const extractDocumentSchema = obj({
+	url: str({
 		description: "URL of the document to extract text from (PDF, DOCX, XLSX, or PPTX)",
 	}),
 });

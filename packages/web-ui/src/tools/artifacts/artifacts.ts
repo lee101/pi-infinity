@@ -2,12 +2,12 @@ import { icon } from "@mariozechner/mini-lit";
 import "@mariozechner/mini-lit/dist/MarkdownBlock.js";
 import type { Agent, AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { StringEnum, type ToolCall } from "@earendil-works/pi-ai";
+import { obj, opt, type Static, str } from "@earendil-works/pi-schema";
 import { Button } from "@mariozechner/mini-lit/dist/Button.js";
 import { html, LitElement, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { createRef, type Ref, ref } from "lit/directives/ref.js";
 import { X } from "lucide";
-import { type Static, Type } from "typebox";
 import type { ArtifactMessage } from "../../components/Messages.ts";
 import { ArtifactsRuntimeProvider } from "../../components/sandbox/ArtifactsRuntimeProvider.ts";
 import { AttachmentsRuntimeProvider } from "../../components/sandbox/AttachmentsRuntimeProvider.ts";
@@ -39,14 +39,14 @@ export interface Artifact {
 }
 
 // JSON-schema friendly parameters object (LLM-facing)
-const artifactsParamsSchema = Type.Object({
+const artifactsParamsSchema = obj({
 	command: StringEnum(["create", "update", "rewrite", "get", "delete", "logs"], {
 		description: "The operation to perform",
 	}),
-	filename: Type.String({ description: "Filename including extension (e.g., 'index.html', 'script.js')" }),
-	content: Type.Optional(Type.String({ description: "File content" })),
-	old_str: Type.Optional(Type.String({ description: "String to replace (for update command)" })),
-	new_str: Type.Optional(Type.String({ description: "Replacement string (for update command)" })),
+	filename: str({ description: "Filename including extension (e.g., 'index.html', 'script.js')" }),
+	content: opt(str({ description: "File content" })),
+	old_str: opt(str({ description: "String to replace (for update command)" })),
+	new_str: opt(str({ description: "Replacement string (for update command)" })),
 });
 export type ArtifactsParams = Static<typeof artifactsParamsSchema>;
 
