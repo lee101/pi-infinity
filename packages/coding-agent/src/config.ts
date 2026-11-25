@@ -610,6 +610,25 @@ export const VERSION: string = pkg.version || "0.0.0";
 export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
 export const ENV_SESSION_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_SESSION_DIR`;
 
+// Upstream pi's names. A rebranded build (APP_NAME !== "pi") still reads them when its own variable
+// is unset, so scripts, CI and docs written for `PI_CODING_AGENT_DIR` keep working.
+export const LEGACY_ENV_AGENT_DIR = "PI_CODING_AGENT_DIR";
+export const LEGACY_ENV_SESSION_DIR = "PI_CODING_AGENT_SESSION_DIR";
+
+function readEnvWithLegacyFallback(name: string, legacyName: string): string | undefined {
+	return process.env[name] || process.env[legacyName] || undefined;
+}
+
+/** The agent directory override from the environment: `ENV_AGENT_DIR`, else `LEGACY_ENV_AGENT_DIR`. */
+export function getEnvAgentDir(): string | undefined {
+	return readEnvWithLegacyFallback(ENV_AGENT_DIR, LEGACY_ENV_AGENT_DIR);
+}
+
+/** The session directory override from the environment: `ENV_SESSION_DIR`, else `LEGACY_ENV_SESSION_DIR`. */
+export function getEnvSessionDir(): string | undefined {
+	return readEnvWithLegacyFallback(ENV_SESSION_DIR, LEGACY_ENV_SESSION_DIR);
+}
+
 export function expandTildePath(path: string): string {
 	return normalizePath(path);
 }
@@ -628,7 +647,7 @@ export function getShareViewerUrl(gistId: string): string {
 
 /** Get the agent config directory (e.g., ~/.pi/agent/) */
 export function getAgentDir(): string {
-	const envDir = process.env[ENV_AGENT_DIR];
+	const envDir = getEnvAgentDir();
 	if (envDir) {
 		return expandTildePath(envDir);
 	}

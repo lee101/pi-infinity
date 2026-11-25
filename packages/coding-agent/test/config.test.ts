@@ -1,15 +1,25 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { homedir, tmpdir } from "os";
 import { delimiter, join } from "path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
+	APP_NAME,
+	CONFIG_DIR_NAME,
 	detectInstallChange,
 	detectInstallMethod,
+	ENV_AGENT_DIR,
+	ENV_SESSION_DIR,
+	expandTildePath,
 	findNodePackageDir,
+	getAgentDir,
 	getConfiguredSelfUpdateArgv,
+	getEnvAgentDir,
+	getEnvSessionDir,
 	getSelfUpdateCommand,
 	getSelfUpdateUnavailableInstruction,
 	getUpdateInstruction,
+	LEGACY_ENV_AGENT_DIR,
+	LEGACY_ENV_SESSION_DIR,
 	makeConfiguredSelfUpdateCommand,
 } from "../src/config.ts";
 
@@ -148,6 +158,42 @@ function createFakeBunScript(bunBin: string): string {
 	const escapedBunBin = bunBin.replaceAll("'", "'\\''");
 	return `#!/bin/sh\nif [ "$1" = "pm" ] && [ "$2" = "bin" ] && [ "$3" = "-g" ]; then\n\tprintf '%s\\n' '${escapedBunBin}'\n\texit 0\nfi\nexit 1\n`;
 }
+
+describe("agent and session directory environment variables", () => {
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+
+	test("derive their names from the app name", () => {
+		expect(ENV_AGENT_DIR).toBe(`${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`);
+		expect(ENV_SESSION_DIR).toBe(`${APP_NAME.toUpperCase()}_CODING_AGENT_SESSION_DIR`);
+	});
+
+	test("default to the agent directory under the config dir", () => {
+		vi.stubEnv(ENV_AGENT_DIR, "");
+		vi.stubEnv(LEGACY_ENV_AGENT_DIR, "");
+		expect(getEnvAgentDir()).toBeUndefined();
+		expect(getAgentDir()).toBe(join(homedir(), CONFIG_DIR_NAME, "agent"));
+	});
+
+	test("prefer the app's own variables over upstream pi's", () => {
+		vi.stubEnv(LEGACY_ENV_AGENT_DIR, "/legacy/agent");
+		vi.stubEnv(LEGACY_ENV_SESSION_DIR, "/legacy/sessions");
+		vi.stubEnv(ENV_AGENT_DIR, "/current/agent");
+		vi.stubEnv(ENV_SESSION_DIR, "/current/sessions");
+		expect(getAgentDir()).toBe(expandTildePath("/current/agent"));
+		expect(getEnvSessionDir()).toBe("/current/sessions");
+	});
+
+	test("fall back to upstream pi's variables when the app's own are unset", () => {
+		vi.stubEnv(ENV_AGENT_DIR, "");
+		vi.stubEnv(ENV_SESSION_DIR, "");
+		vi.stubEnv(LEGACY_ENV_AGENT_DIR, "/legacy/agent");
+		vi.stubEnv(LEGACY_ENV_SESSION_DIR, "/legacy/sessions");
+		expect(getAgentDir()).toBe(expandTildePath("/legacy/agent"));
+		expect(getEnvSessionDir()).toBe("/legacy/sessions");
+	});
+});
 
 describe("findNodePackageDir", () => {
 	test("skips binary metadata copied into dist", () => {
