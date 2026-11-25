@@ -5,10 +5,14 @@ import { fetchWithRetry } from "./management-http.ts";
 import { getPiUserAgent } from "./pi-user-agent.ts";
 
 const OFFICIAL_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
-const LATEST_VERSION_URL =
-	PACKAGE_NAME === OFFICIAL_PACKAGE_NAME
-		? "https://pi.dev/api/latest-version"
-		: `https://registry.npmjs.org/${encodeURIComponent(PACKAGE_NAME)}/latest`;
+/**
+ * Only the official package follows a `packageName` named by its release check (pi.dev can move it to
+ * a new npm scope). Forks query their own npm package and must never be replaced by an upstream package.
+ */
+export const FOLLOWS_RELEASE_PACKAGE_NAME = PACKAGE_NAME === OFFICIAL_PACKAGE_NAME;
+export const LATEST_VERSION_URL = FOLLOWS_RELEASE_PACKAGE_NAME
+	? "https://pi.dev/api/latest-version"
+	: `https://registry.npmjs.org/${encodeURIComponent(PACKAGE_NAME)}/latest`;
 const DEFAULT_VERSION_CHECK_TIMEOUT_MS = 10000;
 
 export interface LatestPiRelease {
@@ -84,7 +88,7 @@ export async function getLatestPiRelease(
 		return undefined;
 	}
 	const packageName =
-		PACKAGE_NAME === OFFICIAL_PACKAGE_NAME && typeof data.packageName === "string" && data.packageName.trim()
+		FOLLOWS_RELEASE_PACKAGE_NAME && typeof data.packageName === "string" && data.packageName.trim()
 			? data.packageName.trim()
 			: undefined;
 	const note = typeof data.note === "string" && data.note.trim() ? data.note.trim() : undefined;

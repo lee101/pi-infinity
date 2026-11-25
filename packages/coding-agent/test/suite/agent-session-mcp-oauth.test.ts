@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import type { ToolResultMessage } from "@earendil-works/pi-ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { APP_NAME } from "../../src/config.ts";
 import { InMemoryAuthStorageBackend } from "../../src/core/auth-storage.ts";
 import { emitSessionShutdownEvent } from "../../src/core/extensions/runner.ts";
 import { runMcpCommand } from "../../src/extensions/mcp/cli.ts";
@@ -200,7 +201,7 @@ describe("AgentSession MCP OAuth", () => {
 
 		const fallback = await setup("follow");
 		await fallback.harness.session.prompt("/mcp login issues");
-		expect(fallback.server.registrations.map((metadata) => metadata.client_name)).toEqual(["pi"]);
+		expect(fallback.server.registrations.map((metadata) => metadata.client_name)).toEqual([APP_NAME]);
 		// OpenID Connect servers reject the loopback redirect URI of a `web` client (#10493).
 		expect(fallback.server.registrations.map((metadata) => metadata.application_type)).toEqual(["native"]);
 	});

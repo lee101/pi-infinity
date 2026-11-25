@@ -5,6 +5,7 @@ import { InMemoryModelsStore, type Model, type Provider } from "@earendil-works/
 import { describe, expect, test, vi } from "vitest";
 import { runAuthLogin } from "../src/cli/auth-login.ts";
 import type { LoginTerminal } from "../src/cli/auth-terminal.ts";
+import { APP_NAME } from "../src/config.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { CredentialSynchronizationError, ModelRuntime } from "../src/core/model-runtime.ts";
 
@@ -144,7 +145,7 @@ function run(
 }
 
 describe("pi auth login", () => {
-	const usage = "Usage: pi auth login <provider> [--api-key] [--no-browser]";
+	const usage = `Usage: ${APP_NAME} auth login <provider> [--api-key] [--no-browser]`;
 
 	test("requires exactly one provider and known options", async () => {
 		const { modelRuntime } = await setup(bothMethods);
@@ -175,7 +176,7 @@ describe("pi auth login", () => {
 		const terminal = scriptedTerminal([], false);
 		expect(await run([PROVIDER_ID], modelRuntime, terminal)).toBe(1);
 		expect(terminal.errors).toEqual([
-			'"pi auth login <provider> [--api-key] [--no-browser]" requires an interactive terminal',
+			`"${APP_NAME} auth login <provider> [--api-key] [--no-browser]" requires an interactive terminal`,
 		]);
 	});
 
@@ -189,7 +190,7 @@ describe("pi auth login", () => {
 		expect(terminal.lines).toContain("Finish in the browser");
 		expect(terminal.opened).toEqual(["https://example.test/authorize"]);
 		expect(terminal.lines).toContain(
-			'To use "Sign in with device code" instead, run "pi auth login login-test --no-browser"',
+			`To use "Sign in with device code" instead, run "${APP_NAME} auth login login-test --no-browser"`,
 		);
 		expect(await credentials.read(PROVIDER_ID)).toMatchObject({ type: "oauth", access: "access-the-code" });
 		expect(terminal.lines.some((line) => line.startsWith("Logged in to Login Test."))).toBe(true);
@@ -217,7 +218,7 @@ describe("pi auth login", () => {
 		const terminal = scriptedTerminal([]);
 		expect(await run([PROVIDER_ID], modelRuntime, terminal)).toBe(0);
 		expect(terminal.lines).toContain(
-			'Other sign-in methods: "Device code", "Copy code". Run "pi auth login login-test --no-browser" to choose one.',
+			`Other sign-in methods: "Device code", "Copy code". Run "${APP_NAME} auth login login-test --no-browser" to choose one.`,
 		);
 	});
 
@@ -405,7 +406,7 @@ describe("pi auth login", () => {
 		const { modelRuntime } = await setup({ apiKey: { name: "AWS profile", resolve: async () => undefined } });
 		const terminal = scriptedTerminal([]);
 		expect(await run([PROVIDER_ID], modelRuntime, terminal)).toBe(1);
-		expect(terminal.errors).toEqual(["Login Test is configured outside pi (AWS profile)."]);
+		expect(terminal.errors).toEqual([`Login Test is configured outside ${APP_NAME} (AWS profile).`]);
 	});
 
 	test("Ctrl+C during the catalog refresh skips it and keeps the login", async () => {
@@ -421,7 +422,9 @@ describe("pi auth login", () => {
 		);
 		const terminal = scriptedTerminal(["sk-test"]);
 		expect(await run([PROVIDER_ID], modelRuntime, terminal, controller.signal)).toBe(0);
-		expect(terminal.lines).toContain("Skipped the Login Test model catalog refresh; pi refreshes it on next start.");
+		expect(terminal.lines).toContain(
+			`Skipped the Login Test model catalog refresh; ${APP_NAME} refreshes it on next start.`,
+		);
 		expect(await credentials.read(PROVIDER_ID)).toMatchObject({ type: "api_key", key: "sk-test" });
 	});
 

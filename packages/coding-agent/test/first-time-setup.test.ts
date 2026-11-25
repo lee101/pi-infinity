@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { shouldRunFirstTimeSetup } from "../src/cli/startup-ui.ts";
+import { isOfficialDistribution, shouldRunFirstTimeSetup } from "../src/cli/startup-ui.ts";
 import { ENV_AGENT_DIR } from "../src/config.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 
@@ -33,8 +33,20 @@ describe("shouldRunFirstTimeSetup", () => {
 		}
 	});
 
-	it("returns true when experimental, default agent dir, and no settings.json", () => {
+	it("recognizes only the official package, app name, and config dir as the official distribution", () => {
+		const official = { packageName: "@earendil-works/pi-coding-agent", appName: "pi", configDirName: ".pi" };
+		expect(isOfficialDistribution(official)).toBe(true);
+		expect(isOfficialDistribution({ ...official, packageName: "@codex-infinity/pi-infinity" })).toBe(false);
+		expect(isOfficialDistribution({ ...official, appName: "pinf" })).toBe(false);
+		expect(isOfficialDistribution({ ...official, configDirName: ".pinf" })).toBe(false);
+	});
+
+	it.runIf(isOfficialDistribution())("returns true when experimental, default agent dir, and no settings.json", () => {
 		expect(shouldRunFirstTimeSetup(settingsPath)).toBe(true);
+	});
+
+	it.skipIf(isOfficialDistribution())("never runs in a rebranded distribution, even with a default setup", () => {
+		expect(shouldRunFirstTimeSetup(settingsPath)).toBe(false);
 	});
 
 	it("returns false when experimental features are disabled", () => {

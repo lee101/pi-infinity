@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs"
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ENV_AGENT_DIR } from "../src/config.ts";
 import { getThemeExportColors } from "../src/modes/interactive/theme/theme.ts";
 
 type ThemeFile = {
@@ -22,17 +23,18 @@ describe("getThemeExportColors", () => {
 
 	beforeEach(() => {
 		tempRoot = mkdtempSync(join(tmpdir(), "pi-theme-export-"));
-		previousAgentDir = process.env.PINF_CODING_AGENT_DIR;
-		process.env.PINF_CODING_AGENT_DIR = join(tempRoot, "agent");
-		mkdirSync(join(process.env.PINF_CODING_AGENT_DIR, "themes"), { recursive: true });
+		previousAgentDir = process.env[ENV_AGENT_DIR];
+		const agentDir = join(tempRoot, "agent");
+		process.env[ENV_AGENT_DIR] = agentDir;
+		mkdirSync(join(agentDir, "themes"), { recursive: true });
 	});
 
 	afterEach(() => {
 		rmSync(tempRoot, { recursive: true, force: true });
 		if (previousAgentDir === undefined) {
-			delete process.env.PINF_CODING_AGENT_DIR;
+			delete process.env[ENV_AGENT_DIR];
 		} else {
-			process.env.PINF_CODING_AGENT_DIR = previousAgentDir;
+			process.env[ENV_AGENT_DIR] = previousAgentDir;
 		}
 	});
 
@@ -59,7 +61,7 @@ describe("getThemeExportColors", () => {
 		};
 
 		writeFileSync(
-			join(process.env.PINF_CODING_AGENT_DIR!, "themes", "custom-export-vars.json"),
+			join(process.env[ENV_AGENT_DIR]!, "themes", "custom-export-vars.json"),
 			JSON.stringify(customTheme, null, 2),
 		);
 
@@ -81,7 +83,7 @@ describe("getThemeExportColors", () => {
 			export: { pageBg: "okhsl(250 20% 15%)", cardBg: "card", infoBg: "oklch(30% 0.05 80)" },
 		};
 		writeFileSync(
-			join(process.env.PI_CODING_AGENT_DIR!, "themes", "custom-export-okhsl.json"),
+			join(process.env[ENV_AGENT_DIR]!, "themes", "custom-export-okhsl.json"),
 			JSON.stringify(customTheme, null, 2),
 		);
 
@@ -114,7 +116,7 @@ describe("getThemeExportColors", () => {
 		};
 
 		writeFileSync(
-			join(process.env.PINF_CODING_AGENT_DIR!, "themes", "custom-export-recursive.json"),
+			join(process.env[ENV_AGENT_DIR]!, "themes", "custom-export-recursive.json"),
 			JSON.stringify(customTheme, null, 2),
 		);
 

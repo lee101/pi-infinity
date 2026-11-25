@@ -10,6 +10,7 @@ import { Agent } from "@earendil-works/pi-agent-core";
 import type { OAuthCredentials } from "@earendil-works/pi-ai";
 import { getModel, streamSimple } from "@earendil-works/pi-ai/compat";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
+import { CONFIG_DIR_NAME } from "../src/config.ts";
 import { AgentSession } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { createEventBus } from "../src/core/event-bus.ts";
@@ -35,7 +36,7 @@ export const API_KEY = process.env.ANTHROPIC_OAUTH_TOKEN || process.env.ANTHROPI
 // OAuth API key resolution from ~/.pi/agent/auth.json
 // ============================================================================
 
-const AUTH_PATH = join(homedir(), ".pinf", "agent", "auth.json");
+const AUTH_PATH = join(homedir(), CONFIG_DIR_NAME, "agent", "auth.json");
 
 type ApiKeyCredential = {
 	type: "api_key";
@@ -112,7 +113,7 @@ export function hasAuthForProvider(provider: string): boolean {
 }
 
 /** Path to the real pi agent config directory */
-export const PI_AGENT_DIR = join(homedir(), ".pinf", "agent");
+export const PI_AGENT_DIR = join(homedir(), CONFIG_DIR_NAME, "agent");
 
 /**
  * Get an AuthStorage instance backed by ~/.pi/agent/auth.json

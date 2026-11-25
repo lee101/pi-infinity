@@ -1,6 +1,7 @@
 import { type Credential, InMemoryModelsStore } from "@earendil-works/pi-ai";
 import { describe, expect, test, vi } from "vitest";
 import { runAuthLogout } from "../src/cli/auth-logout.ts";
+import { APP_NAME } from "../src/config.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { CredentialSynchronizationError, ModelRuntime } from "../src/core/model-runtime.ts";
 
@@ -36,7 +37,7 @@ describe("pi auth logout", () => {
 		for (const args of [[], ["--api-key"], ["radius", "extra"]]) {
 			errors.length = 0;
 			expect(await run(args)).toBe(1);
-			expect(errors).toEqual(["Usage: pi auth logout <provider>"]);
+			expect(errors).toEqual([`Usage: ${APP_NAME} auth logout <provider>`]);
 		}
 	});
 
