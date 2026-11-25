@@ -76,6 +76,11 @@ value="${NODE_EXTRA_CA_CERTS-}"
 
 # The pi-env tests build their daemon with cargo, whose toolchains live under the real home.
 test_env+=("RUSTUP_HOME=${RUSTUP_HOME:-$HOME/.rustup}" "CARGO_HOME=${CARGO_HOME:-$HOME/.cargo}")
+# Honor an explicit compiler-wrapper choice (RUSTC_WRAPPER= disables a config'd sccache, whose
+# daemon would otherwise start inside the isolated HOME/TMPDIR and outlive the cleanup below).
+for name in RUSTC_WRAPPER CARGO_BUILD_RUSTC_WRAPPER; do
+	[[ -z "${!name+set}" ]] || test_env+=("$name=${!name}")
+done
 
 # Preserve CI detection only for runner behavior and test reporting.
 for name in CI GITHUB_ACTIONS; do
